@@ -3,7 +3,8 @@
 OPTS="$*"
 HOSTNAME="`hostname`"
 HOSTS="$HOSTNAME"
-LOCAL_REPO="false"
+MASTERS=""
+MINIONS=""
 LOCAL_REPO_DEVICE=""
 
 for opt in $OPTS ; do
@@ -21,9 +22,6 @@ for opt in $OPTS ; do
     ;;
     --root-password=*)
       ROOT_PASSWORD=$VALUE
-    ;;
-    --local-repo=*)
-      LOCAL_REPO=$VALUE
     ;;
     --local-repo-device=*)
       LOCAL_REPO_DEVICE=$VALUE
@@ -51,12 +49,57 @@ if [ "x$ROOT_PASSWORD" = "x" ] ; then
    exit
 fi
 
-# Register system, subscribe to OpenShift Employee subscription
+if [ -f "ose-installation-domain.cfg" ] ; then
+  HOSTS="`cat ose-installation-domain.cfg | cut -d"," -f1`"
+  MASTERS="`grep ",master," ose-installation-domain.cfg | cut -d"," -f1`"
+  MINIONS="`grep ",node," ose-installation-domain.cfg | cut -d"," -f1`"
+else
+  echo "Mandatory configuration-file ose-installation-domain.cfg missing."
+  exit
+fi
+
+# Get IP of system
+IP=`ifconfig eth0 | grep "inet " | awk '{print $2}'`
+echo "$IP $HOSTNAME" >> /etc/hosts
+
+firewall-cmd --zone=public --add-port=22/tcp --permanent
+firewall-cmd --reload
+
+rm -f ~/.ssh/id_rsa
+ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
+cat > ./getpwd.sh <<EOF
+#!/bin/bash
+echo '$ROOT_PASSWORD'
+EOF
+
+chmod 0700 ./getpwd.sh
+export SSH_ASKPASS='./getpwd.sh'
+export DISPLAY=nodisplay
+cat > ~/.ssh/config <<EOF
+Host 192.168.122.*
+   StrictHostKeyChecking no
+Host $HOSTNAME
+   StrictHostKeyChecking no
+EOF
+
+for host in $HOSTS ; do
+  cat >> ~/.ssh/config <<EOF
+Host $host
+   StrictHostKeyChecking no
+EOF
+
+  setsid ssh-copy-id root@$host
+done
+rm -f ./getpwd.sh
+
+# Register master system, subscribe to OpenShift subscription
+subscription-manager remove --all
+subscription-manager unregister
+subscription-manager clean
 subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD
 subscription-manager attach --pool=$POOL_ID
 
 # Enable only needed repos
-
 subscription-manager repos --disable="*"
 subscription-manager repos \
 --enable="rhel-7-server-rpms" \
@@ -64,8 +107,23 @@ subscription-manager repos \
 --enable="rhel-7-server-optional-rpms" \
 --enable="rhel-7-server-ose-3.0-rpms"
 
+# Register node systems, subscribe them to OpenShift subscription
+for node in $MINIONS ; do
+  ssh root@$node "subscription-manager remove --all"
+  ssh root@$node "subscription-manager unregister"
+  ssh root@$node "subscription-manager clean"
+  ssh root@$node "subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD"
+  ssh root@$node "subscription-manager attach --pool=$POOL_ID"
+  ssh root@$node "subscription-manager repos --disable="*""
+  ssh root@$node "subscription-manager repos \
+--enable="rhel-7-server-rpms" \
+--enable="rhel-7-server-extras-rpms" \
+--enable="rhel-7-server-optional-rpms" \
+--enable="rhel-7-server-ose-3.0-rpms""
+done
+
 # Use locally synced repos to speed-up setup
-if [ "$LOCAL_REPO" = "true" ] ; then
+if [ ! "x$LOCAL_REPO_DEVICE" = "x" ] ; then
   mkdir -p /mnt/local-repo
   mount -w $LOCAL_REPO_DEVICE /mnt/local-repo
 
@@ -130,8 +188,8 @@ sslcacert = /etc/rhsm/ca/redhat-uep.pem
 gpgcheck = 1
 EOF
 
-  yum clean all
-  subscription-manager clean
+  #yum clean all
+  #subscription-manager clean
 fi
 
 # Install networking tools
@@ -173,10 +231,6 @@ yum install -y wget git net-tools bind-utils iptables-services bridge-utils
 #systemctl start named
 #systemctl enable named
 
-# Get IP of system
-IP=`ifconfig eth0 | grep "inet " | awk '{print $2}'`
-echo "$IP $HOSTNAME" >> /etc/hosts
-
 # Install docker
 yum install -y docker
 
@@ -187,48 +241,23 @@ systemctl stop docker
 rm -rf /var/lib/docker/*
 systemctl restart docker
 
-if [ "$LOCAL_REPO" = "true" ] ; then
+if [ ! "x$LOCAL_REPO_DEVICE" = "x" ] ; then
   DOCKERIMAGES="`ls /mnt/local-repo/docker-images`"
   for dockerimage in $DOCKERIMAGES ; do docker load -i /mnt/local-repo/docker-images/${dockerimage} ; done
 fi
 
 # Create openshift user
 yum install -y python-virtualenv gcc
-firewall-cmd --zone=public --add-port=22/tcp --permanent
-firewall-cmd --reload
 
-IP=`ifconfig eth0 | grep "inet " | awk '{print $2}'`
-rm -f ~/.ssh/id_rsa
-ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
-cat > ./getpwd.sh <<EOF
-#!/bin/bash
-echo '$ROOT_PASSWORD'
-EOF
-
-chmod 0700 ./getpwd.sh
-export SSH_ASKPASS='./getpwd.sh'
-export DISPLAY=nodisplay
-cat > ~/.ssh/config <<EOF
-Host 192.168.122.*
-   StrictHostKeyChecking no
-Host $HOSTNAME 
-   StrictHostKeyChecking no
-EOF
-
-for host in $HOSTS ; do
-  setsid ssh-copy-id root@$host
-done
-rm -f ./getpwd.sh
+# Register and subscribe minions
 
 # Start OSE installation (using ansible)
 yum -y install https://dl.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-5.noarch.rpm
 sed -i -e "s/^enabled=1/enabled=0/" /etc/yum.repos.d/epel.repo
 yum -y --enablerepo=epel install ansible
-cd ~
-git clone https://github.com/openshift/openshift-ansible
-cd openshift-ansible
-cat > /etc/ansible/hosts <<EOF
+
 # Create an OSEv3 group that contains the masters and nodes groups" > /etc/ansible/hosts
+cat > /etc/ansible/hosts <<EOF
 [OSEv3:children]
 masters
 nodes
@@ -249,13 +278,31 @@ openshift_master_identity_providers=[{'name': 'htpasswd_auth', 'login': 'true', 
 
 # host group for masters
 [masters]
-$HOSTNAME
+EOF
+for node in $MASTERS ; do
+  NODE_REGION=`grep "$node,master" ose-installation-domain.cfg | cut -d"," -f3`
+  NODE_ZONE=`grep "$node,master" ose-installation-domain.cfg | cut -d"," -f4`
+  cat >> /etc/ansible/hosts <<EOF
+$node openshift_node_labels="{'region': '$NODE_REGION', 'zone': '$NODE_ZONE'}"
+EOF
+done
 
+cat >> /etc/ansible/hosts <<EOF
 # host group for nodes, includes region info
 [nodes]
-$HOSTNAME openshift_node_labels="{'region': 'primary', 'zone': 'default'}"
 EOF
 
+for node in $MINIONS ; do
+  NODE_REGION=`grep "$node,node" ose-installation-domain.cfg | cut -d"," -f3`
+  NODE_ZONE=`grep "$node,node" ose-installation-domain.cfg | cut -d"," -f4`
+  cat >> /etc/ansible/hosts <<EOF
+$node openshift_node_labels="{'region': '$NODE_REGION', 'zone': '$NODE_ZONE'}"
+EOF
+done
+
+cd ~
+git clone https://github.com/openshift/openshift-ansible
+cd openshift-ansible
 ansible-playbook playbooks/byo/config.yml
 
 # Add user

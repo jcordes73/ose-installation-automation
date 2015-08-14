@@ -13,7 +13,7 @@ for opt in $OPTS ; do
   esac
 done
 
-if [ ! -f "$LOCAL_REPO_DEVICE" ] ; then
+if [ ! -e "$LOCAL_REPO_DEVICE" ] ; then
   parted /dev/vdb mklabel gpt
   parted /dev/vdb mkpart local-repo ext4 0% 100%
   mkfs.xfs /dev/vdb1
@@ -37,5 +37,5 @@ createrepo -v /mnt/local-repo/osev3_0
 
 # Create local docker repo
 mkdir -p /mnt/local-repo/docker-images
-IMAGESTREAMS="`oc get imagestream -n openshift | tail -n +2 | awk '{printf("%s ",$1)}'`"
-for imagestream in $IMAGESTREAMS ; do oc import-image $imagestream -n openshift ; done
+DOCKERIMAGES="`docker images | tail -n +2 | awk '{printf("%s ",$3)}'`"
+for dockerimage in $DOCKERIMAGES ; do docker save -o /mnt/local-repo/docker-images/${dockerimage}.tar ${dockerimage} ; done

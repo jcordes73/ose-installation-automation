@@ -147,6 +147,7 @@ virt-install \
 --memory ${NODE_RAM} \
 --accelerate \
 -n OSE_${NODE_TYPE}_${NODE_NAME} \
+--cpu host,+invtsc \
 --vcpus ${NODE_VCPUS} \
 --disk path=${VM_PATH}/ose-${NODE_NAME}.qcow2,format=qcow2,bus=virtio,io=native,cache=directsync \
 -l ${RHEL_ISO} \
