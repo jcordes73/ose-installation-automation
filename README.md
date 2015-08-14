@@ -46,7 +46,9 @@ The OpenShift domain configuration has to be defined in ose-installation-domain.
 
 This configuration file is in CSV format using the following fields:
 
-```<node-name>,<type>,<region>,<zone>```
+```
+<node-name>,<type>,<region>,<zone>
+```
 
 where *node-name* is a DNS name, *type* is one of **master** or **node**. The values *region* and *zone* are relevant for the placement of pods, you would usually specify **primary** and **default** respectively.
 
