@@ -14,8 +14,7 @@ To create a master-node VM execute
 
 Of course you can change the ip and hostname values to your liking.
 
-If you want to have an additional disk attached, please add
-```--attach-disk=<path-to-qcow2-image>```
+If you want to have an additional disk attached, please add ```--attach-disk=<path-to-qcow2-image>```
 This additional disk could then be used to host a local repository (see later sections in this document).
 
 ### Minion
