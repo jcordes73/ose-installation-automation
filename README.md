@@ -16,6 +16,7 @@ Of course you can change the ip and hostname values to your liking.
 
 If you want to have an additional disk attached, please add
 ```--attach-disk=<path-to-qcow2-image>```
+
 ### Minion
 For a minion-node add a node-type, i.e.
 ```./ose-create-vm.sh --vm-path=<dir-to-vms> --rhel-iso=<rhel-iso> --ip=192.168.122.101 --hostname=node1.example.com --root-pw='<root-password>' --node-type=node```
