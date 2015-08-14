@@ -32,6 +32,7 @@ The local repositories provided via the local repository creation procedure cons
 
  - yum repositories for rhel-7-server-rpms, rhel-7-server-optional-rpms, rhel-7-server-extras-rpms and rhel-7-server-ose-3.0-rpms
  - Docker images
+
 ### Procedure
 The procedure to create a local repository consists of the following steps:
 
