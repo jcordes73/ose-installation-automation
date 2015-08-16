@@ -96,31 +96,18 @@ rm -f ./getpwd.sh
 subscription-manager remove --all
 subscription-manager unregister
 subscription-manager clean
-subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD
-subscription-manager attach --pool=$POOL_ID
 
-# Enable only needed repos
-subscription-manager repos --disable="*"
-subscription-manager repos \
---enable="rhel-7-server-rpms" \
---enable="rhel-7-server-extras-rpms" \
---enable="rhel-7-server-optional-rpms" \
---enable="rhel-7-server-ose-3.0-rpms"
+if [ "x$LOCAL_REPO_DEVICE" = "x" ] ; then
+  subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD
+  subscription-manager attach --pool=$POOL_ID
 
-# Register node systems, subscribe them to OpenShift subscription
-for node in $MINIONS ; do
-  ssh root@$node "subscription-manager remove --all"
-  ssh root@$node "subscription-manager unregister"
-  ssh root@$node "subscription-manager clean"
-  ssh root@$node "subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD"
-  ssh root@$node "subscription-manager attach --pool=$POOL_ID"
-  ssh root@$node "subscription-manager repos --disable="*""
-  ssh root@$node "subscription-manager repos \
---enable="rhel-7-server-rpms" \
---enable="rhel-7-server-extras-rpms" \
---enable="rhel-7-server-optional-rpms" \
---enable="rhel-7-server-ose-3.0-rpms""
-done
+  subscription-manager repos --disable="*"
+  subscription-manager repos \
+  --enable="rhel-7-server-rpms" \
+  --enable="rhel-7-server-extras-rpms" \
+  --enable="rhel-7-server-optional-rpms" \
+  --enable="rhel-7-server-ose-3.0-rpms"
+fi
 
 # Use locally synced repos to speed-up setup
 if [ ! "x$LOCAL_REPO_DEVICE" = "x" ] ; then
@@ -188,9 +175,36 @@ sslcacert = /etc/rhsm/ca/redhat-uep.pem
 gpgcheck = 1
 EOF
 
-  #yum clean all
-  #subscription-manager clean
+  rm -f /etc/yum.repos.d/redhat.repo
+  yum clean all
 fi
+
+
+# Register node systems, subscribe them to OpenShift subscription
+for node in $MINIONS ; do
+  if [ "$node" != "$HOSTNAME" ] ; then
+    ssh root@$node "subscription-manager remove --all"
+    ssh root@$node "subscription-manager unregister"
+    ssh root@$node "subscription-manager clean"
+
+    if [ "x$LOCAL_REPO_DEVICE" = "x" ] ; then
+      ssh root@$node "subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD"
+      ssh root@$node "subscription-manager attach --pool=$POOL_ID"
+      ssh root@$node "subscription-manager repos --disable="*""
+      ssh root@$node "subscription-manager repos \
+    --enable="rhel-7-server-rpms" \
+    --enable="rhel-7-server-extras-rpms" \
+    --enable="rhel-7-server-optional-rpms" \
+    --enable="rhel-7-server-ose-3.0-rpms""
+    else
+      scp /etc/yum.repos.d/ose-local.repo root@$node:/etc/yum.repos.d
+      ssh root@$node "rm -f /etc/yum.repos.d/redhat.repo"
+      ssh root@$node "yum clean all"
+      ssh root@$node "mkdir -p /mnt/local-repo"
+      ssh root@$node "mount -w $LOCAL_REPO_DEVICE /mnt/local-repo"
+    fi
+  fi
+done
 
 # Install networking tools
 yum install -y wget git net-tools bind-utils iptables-services bridge-utils
