@@ -37,7 +37,7 @@ function sleep_while_vm () {
 NODE_TYPE=master
 NODE_LANG=`localectl | grep LANG | sed 's/.*LANG=\(.*\)/\1/g'`
 NODE_KEYBOARD=`localectl | grep "VC Keymap" | sed 's/.*: \(.*\)/\1/g'` 
-NODE_TIMEZONE="`timedatectl | grep Timezone | sed 's/.*Timezone: \(.*\) (.*/\1/g' | sed 's/\//\\\\\//g'`"
+NODE_TIMEZONE="`timedatectl | grep -i Time | grep -i zone | sed 's/.*Timezone: \(.*\) (.*/\1/g' | sed 's/\//\\\\\//g'`"
 NODE_VCPUS=2
 NODE_RAM=4096
 NODE_DISKSIZE=80G
@@ -160,7 +160,7 @@ rm -f $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml $DIRNAME/ose-${NODE_TYPE}-kickstart-v
 sleep_while_vm running
 
 if [ "x${NODE_ATTACH_DISK}" != "x" ] ; then
-  virsh attach-disk OSE_${NODE_TYPE}_${NODE_NAME} ${NODE_ATTACH_DISK} vdb --type disk --driver qemu --subdriver qcow2 --cache directsync --targetbus virtio --config
+  virsh attach-disk OSE_${NODE_TYPE}_${NODE_NAME} ${NODE_ATTACH_DISK} vdb --type disk --driver qemu --subdriver qcow2 --cache directsync --targetbus virtio --mode shareable --config
 fi
 
 virsh start OSE_${NODE_TYPE}_${NODE_NAME}
