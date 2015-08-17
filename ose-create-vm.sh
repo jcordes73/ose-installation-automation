@@ -37,7 +37,7 @@ function sleep_while_vm () {
 NODE_TYPE=master
 NODE_LANG=`localectl | grep LANG | sed 's/.*LANG=\(.*\)/\1/g'`
 NODE_KEYBOARD=`localectl | grep "VC Keymap" | sed 's/.*: \(.*\)/\1/g'` 
-NODE_TIMEZONE="`timedatectl | grep -i Time | grep -i zone | sed 's/.*Timezone: \(.*\) (.*/\1/g' | sed 's/\//\\\\\//g'`"
+NODE_TIMEZONE="`timedatectl | grep -i Time | grep -i zone | cut -d":" -f2 | cut -d" " -f2`"
 NODE_VCPUS=2
 NODE_RAM=4096
 NODE_DISKSIZE=80G
@@ -78,7 +78,7 @@ for opt in $OPTS ; do
      NODE_KEYBOARD=$VALUE
   ;;
   --timezone=*)
-     NODE_TIMEZONE="`echo $VALUE | sed 's/\//\\\\\//g'`"
+     NODE_TIMEZONE=$VALUE
   ;;
   --attach-disk=*)
      NODE_ATTACH_DISK=$VALUE
@@ -131,7 +131,7 @@ sed "s/NODE_IP/$NODE_IP/g" $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg.template |
 sed "s/NODE_HOSTNAME/$NODE_HOSTNAME/g" | \
 sed "s/NODE_LANG/$NODE_LANG/g" | \
 sed "s/NODE_KEYBOARD/$NODE_KEYBOARD/g" | \
-sed "s/NODE_TIMEZONE/$NODE_TIMEZONE/g" | \
+sed "s/NODE_TIMEZONE/${NODE_TIMEZONE//\//\/}/g" | \
 sed "s/NODE_ROOT_PASSWORD/$NODE_ROOT_PASSWORD/g" \
 > $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg
 
