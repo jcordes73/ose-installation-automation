@@ -19,6 +19,8 @@ Of course you can change the ip and hostname values to your liking.
 If you want to have an additional disk attached, please add ```--attach-disk=<path-to-qcow2-image>```
 This additional disk could then be used to host a local repository (see later sections in this document).
 
+To speed-up VM creation you can specify ```--enable-data-plane=yes```. This enables data-plane usage for virtio. Please note that this feature is still experimental in libvirt.
+
 ### Minion
 For a minion-node add a node-type, i.e.
 ```

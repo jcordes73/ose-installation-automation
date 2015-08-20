@@ -1,5 +1,13 @@
 #!/bin/bash
 
+trap interrupt 1 2 3 6 9 15
+
+function interrupt()
+{
+  echo "OSE installation aborted"
+  exit
+}
+
 OPTS="$*"
 HOSTNAME="`hostname`"
 HOSTS="$HOSTNAME"
