@@ -1,5 +1,7 @@
 #!/bin/bash
 
+trap interrupt 1 2 3 6 9 15
+
 function show_usage() {
   echo "Usage: ose-create-vm.sh <parameters>"
   echo "  Mandatory parameters"
@@ -12,8 +14,13 @@ function show_usage() {
   echo "    --lang=<locale>"
   echo "    --keyboard=<keyboard-type>"
   echo "    --timezone=<timezone>"
+  echo "    --vm-disk-format=<vm-disk-format> (either qcow2 or raw)"
+  echo "    --vm-disk-io=<vm-disk-io-mode> (either default, native or threads)"
+  echo "    --vcpus=<#vcpus> (default is 2)"
+  echo "    --memory=<RAM in MB> (default is 4096)"
   echo "    --node-type=master|node (default is master)"
   echo "    --attach-disk=<disk-image>"
+  echo "    --enable-data-plane=<yes|no> (it's disabled by default)"
 }
 
 function sleep_while_vm () {
@@ -34,15 +41,27 @@ function sleep_while_vm () {
   done 
 }
 
+function interrupt()
+{
+  echo "OSE VM creation for $NODE_TYPE $NODE_NAME aborted"
+  rm -f OSE_${NODE_TYPE}_${NODE_NAME}.xml /tmp/vmlinuz-ose /tmp/initrd.img-ose
+  exit
+}
+
 NODE_TYPE=master
 NODE_LANG=`localectl | grep LANG | sed 's/.*LANG=\(.*\)/\1/g'`
 NODE_KEYBOARD=`localectl | grep "VC Keymap" | sed 's/.*: \(.*\)/\1/g'` 
 NODE_TIMEZONE="`timedatectl | grep -i Time | grep -i zone | cut -d":" -f2 | cut -d" " -f2`"
 NODE_VCPUS=2
-NODE_RAM=4096
+NODE_MEMORY=4096
 NODE_DISKSIZE=80G
+NODE_DISKFORMAT="qcow2"
+NODE_DISKBUS="virtio"
+NODE_DISKIO="native"
+NODE_DISKCACHE="directsync"
 NODE_ATTACH_DISK=""
 NODE_ROOT_PASSWORD=""
+NODE_DATA_PLANE="off"
 
 DIRNAME=`dirname "$0"`
 
@@ -56,6 +75,12 @@ for opt in $OPTS ; do
   --vm-path=*)
      VM_PATH=$VALUE
   ;;
+  --vm-disk-format=*)
+     NODE_DISKFORMAT=$VALUE
+  ;;
+  --vm-disk-io=*)
+    NODE_DISKIO=$VALUE
+  ;;
   --rhel-iso=*)
      RHEL_ISO=$VALUE
   ;;
@@ -63,7 +88,7 @@ for opt in $OPTS ; do
      NODE_VCPUS=$VALUE
   ;;
   --memory=*)
-     NODE_RAM=$VALUE
+     NODE_MEMORY=$VALUE
   ;;
   --ip=*)
      NODE_IP=$VALUE
@@ -85,6 +110,12 @@ for opt in $OPTS ; do
   ;;
   --root-pw=*)
      NODE_ROOT_PASSWORD="$VALUE"
+  ;;
+  --enable-data-plane=*)
+     if [ "$VALUE" = "yes" ] ; then
+       NODE_DATA_PLANE="on"
+       echo "data-plan switched on"
+     fi
   ;;
   esac
 done
@@ -131,36 +162,107 @@ sed "s/NODE_IP/$NODE_IP/g" $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg.template |
 sed "s/NODE_HOSTNAME/$NODE_HOSTNAME/g" | \
 sed "s/NODE_LANG/$NODE_LANG/g" | \
 sed "s/NODE_KEYBOARD/$NODE_KEYBOARD/g" | \
-sed "s/NODE_TIMEZONE/${NODE_TIMEZONE//\//\/}/g" | \
+sed "s/NODE_TIMEZONE/$(echo $NODE_TIMEZONE | sed -e 's/[\/&]/\\&/g')/g" | \
 sed "s/NODE_ROOT_PASSWORD/$NODE_ROOT_PASSWORD/g" \
 > $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg
 
-qemu-img create -f qcow2 ${VM_PATH}/ose-${NODE_NAME}.qcow2 ${NODE_DISKSIZE}
+qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT 1440K
+mkfs.ext2 -F ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT
+mkdir -p /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart
+mount ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart
+cp $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart/ks.cfg
+umount /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart
+
+mkdir -p /mnt/rhel-iso
+mount -o loop $RHEL_ISO /mnt/rhel-iso
+cp /mnt/rhel-iso/isolinux/vmlinuz /tmp/vmlinuz-ose
+cp /mnt/rhel-iso/isolinux/initrd.img /tmp/initrd.img-ose
+umount /mnt/rhel-iso
+chcon -t virt_image_t /tmp/vmlinuz-ose
+chcon -t virt_image_t /tmp/initrd.img-ose
+
+qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT ${NODE_DISKSIZE}
+
 virsh net-update default delete dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml --live
 virsh net-update default add dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml --live
-virt-install \
---virt-type kvm \
---noautoconsole \
---connect qemu:///system \
---os-type=linux \
---os-variant=rhel7 \
---memory ${NODE_RAM} \
---accelerate \
--n OSE_${NODE_TYPE}_${NODE_NAME} \
---cpu host,+invtsc \
---vcpus ${NODE_VCPUS} \
---disk path=${VM_PATH}/ose-${NODE_NAME}.qcow2,format=qcow2,bus=virtio,io=native,cache=directsync \
--l ${RHEL_ISO} \
---network=default,model=virtio \
---initrd-inject $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg \
---extra-args "ks=file:/ose-${NODE_TYPE}-kickstart-vm.cfg ksdevice=eth0"
+
+cat > OSE_${NODE_TYPE}_${NODE_NAME}.xml <<EOF
+<domain type="kvm" xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+  <name>OSE_${NODE_TYPE}_${NODE_NAME}</name>
+  <memory unit='MB'>${NODE_MEMORY}</memory>
+  <os>
+    <type arch='x86_64' machine='pc-i440fx-rhel7.0.0'>hvm</type>
+    <kernel>/tmp/vmlinuz-ose</kernel>
+    <initrd>/tmp/initrd.img-ose</initrd>
+    <cmdline> ks=hd:fd0:/ks.cfg ksdevice=eth0</cmdline>
+  </os>
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>destroy</on_reboot>
+  <on_crash>destroy</on_crash> 
+  <devices>
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='${RHEL_ISO}'/>
+      <target dev='hda' bus='ide'/>
+      <readonly/>
+      <address type='drive' controller='0' bus='1' unit='0'/>
+    </disk>
+    <disk type='file' device='floppy'>
+      <driver name='qemu' type='raw'/>
+      <source file='${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT'/>
+      <target dev='fd0' bus='fdc'/>
+      <readonly/>
+      <address type='drive' controller='0' bus='0' unit='0'/>
+    </disk>
+    <graphics type='vnc' autoport='yes'>
+    </graphics>
+  </devices>
+  <qemu:commandline>
+    <qemu:arg value='-set'/>
+    <qemu:arg value='device.virtio-disk0.scsi=off'/>
+  </qemu:commandline>
+  <qemu:commandline>
+    <qemu:arg value='-set'/>
+    <qemu:arg value='device.virtio-disk0.config-wce=off'/>
+  </qemu:commandline>
+  <qemu:commandline>
+    <qemu:arg value='-set'/>
+    <qemu:arg value='device.virtio-disk0.x-data-plane=${NODE_DATA_PLANE}'/>
+  </qemu:commandline>
+</domain>
+EOF
+
+virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --disk path=${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT,format=$NODE_DISKFORMAT,bus=$NODE_DISKBUS,io=$NODE_DISKIO,cache=$NODE_DISKCACHE
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --network default,model=virtio
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --edit --cpu host,-invtsc
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --edit --vcpu ${NODE_VCPUS}
+virsh start OSE_${NODE_TYPE}_${NODE_NAME}
 
 rm -f $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg 
 
 sleep_while_vm running
 
+virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} hda --current
+virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} fd0 --current
+
 if [ "x${NODE_ATTACH_DISK}" != "x" ] ; then
   virsh attach-disk OSE_${NODE_TYPE}_${NODE_NAME} ${NODE_ATTACH_DISK} vdb --type disk --driver qemu --subdriver qcow2 --cache directsync --targetbus virtio --mode shareable --config
 fi
+
+virsh dumpxml OSE_${NODE_TYPE}_${NODE_NAME} > OSE_${NODE_TYPE}_${NODE_NAME}.xml
+sed -i 's/<kernel>.*<\/kernel>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
+sed -i 's/<initrd>.*<\/initrd>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
+sed -i 's/<cmdline>.*<\/cmdline>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
+sed -i 's/<on_reboot>.*<\/on_reboot>/<on_reboot>restart<\/on_reboot>/g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
+virsh undefine OSE_${NODE_TYPE}_${NODE_NAME}
+virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml
+
+rm -f OSE_${NODE_TYPE}_${NODE_NAME}.xml /tmp/vmlinuz-ose /tmp/initrd.img-ose
 
 virsh start OSE_${NODE_TYPE}_${NODE_NAME}
