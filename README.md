@@ -65,7 +65,14 @@ This configuration file is in CSV format using the following fields:
 
 where *node-name* is a DNS name, *type* is one of **master** or **node**. The values *region* and *zone* are relevant for the placement of pods, you would usually specify **primary** and **default** respectively.
 
-Below you can find an example:
+Right now the file contains a single instance configuration, i.e. master and node are on the same box, i.e.
+
+```
+openshift.example.com,master,primary,default
+openshift.example.com,node,primary,default
+```
+
+An example on how to configure dedicated nodes and masters can be found below:
 
 ```
 openshift.example.com,master,primary,default

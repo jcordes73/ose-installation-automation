@@ -2,6 +2,28 @@
 
 trap interrupt 1 2 3 6 9 15
 
+function log()
+{
+  DATE="`date`"
+  COLOR=""
+  case "$1" in
+    debug)
+      COLOR="" 
+    ;;
+    info)
+      COLOR="\x1B[01;94m"
+    ;;
+    warn)
+      COLOR="\x1B[01;93m"
+    ;;
+    error)
+      COLOR="\x1B[31m"
+    ;;
+  esac
+
+  echo -e "${COLOR}$1 $DATE $2\x1B[0m"
+}
+
 function show_usage() {
   echo "Usage: ose-create-vm.sh <parameters>"
   echo "  Mandatory parameters"
@@ -114,38 +136,37 @@ for opt in $OPTS ; do
   --enable-data-plane=*)
      if [ "$VALUE" = "yes" ] ; then
        NODE_DATA_PLANE="on"
-       echo "data-plan switched on"
      fi
   ;;
   esac
 done
 
 if [ "x$VM_PATH" = "x" ] ; then
-  echo "Mandatory parameter --vm-path missing"
+  log error "Mandatory parameter --vm-path missing"
   show_usage
   exit
 fi
 
 if [ "x${RHEL_ISO}" = "x" ] ; then
-  echo "Mandatory parameter --rhel-iso missing"
+  log error "Mandatory parameter --rhel-iso missing"
   show_usage
   exit
 fi
 
 if [ "x$NODE_IP" = "x" ] ; then
-  echo "Mandatory parameter --ip missing"
+  log error "Mandatory parameter --ip missing"
   show_usage
   exit
 fi
 
 if [ "x$NODE_HOSTNAME" = "x" ] ; then
-  echo "Mandatory parameter --hostname missing"
+  log error "Mandatory parameter --hostname missing"
   show_usage
   exit
 fi
 
 if [ "x$NODE_ROOT_PASSWORD" = "x" ] ; then
-  echo "Mandatory parameter --root-pw missing"
+  log error "Mandatory parameter --root-pw missing"
   show_usage
   exit
 fi
@@ -155,6 +176,8 @@ if [ "$NODE_TYPE" = "node" ] ; then
 fi
 
 NODE_NAME=`echo $NODE_HOSTNAME | cut -d"." -f1`
+
+log info "Creating VM for OpenShift $NODE_TYPE with $NODE_VCPUS vcpus, ${NODE_MEMORY}kb memory and $NODE_DISKSIZE of storage."
 
 sed "s/NODE_IP/$NODE_IP/g" $DIRNAME/ose-dns-vm.xml.template | sed "s/NODE_HOSTNAME/$NODE_HOSTNAME/g" > $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml
 
@@ -166,25 +189,35 @@ sed "s/NODE_TIMEZONE/$(echo $NODE_TIMEZONE | sed -e 's/[\/&]/\\&/g')/g" | \
 sed "s/NODE_ROOT_PASSWORD/$NODE_ROOT_PASSWORD/g" \
 > $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg
 
-qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT 1440K
-mkfs.ext2 -F ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT
-mkdir -p /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart
-mount ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart
-cp $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart/ks.cfg
-umount /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart
+log info "Created kickstart config."
 
-mkdir -p /mnt/rhel-iso
-mount -o loop $RHEL_ISO /mnt/rhel-iso
-cp /mnt/rhel-iso/isolinux/vmlinuz /tmp/vmlinuz-ose
-cp /mnt/rhel-iso/isolinux/initrd.img /tmp/initrd.img-ose
-umount /mnt/rhel-iso
-chcon -t virt_image_t /tmp/vmlinuz-ose
-chcon -t virt_image_t /tmp/initrd.img-ose
+qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT 1440K >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+mkfs.ext2 -F ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+mkdir -p /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+mount ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart.$NODE_DISKFORMAT /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+cp $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart/ks.cfg >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+umount /mnt/${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_kickstart >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
-qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT ${NODE_DISKSIZE}
+log info "Created kickstart image."
 
-virsh net-update default delete dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml --live
-virsh net-update default add dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml --live
+mkdir -p /mnt/rhel-iso >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+mount -o loop $RHEL_ISO /mnt/rhel-iso >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+cp /mnt/rhel-iso/isolinux/vmlinuz /tmp/vmlinuz-ose >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+cp /mnt/rhel-iso/isolinux/initrd.img /tmp/initrd.img-ose >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+umount /mnt/rhel-iso >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+chcon -t virt_image_t /tmp/vmlinuz-ose >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+chcon -t virt_image_t /tmp/initrd.img-ose >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+
+log info "Providing vmlinuz and initrd for initial creation."
+
+qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT ${NODE_DISKSIZE} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+
+log info "Created VM image."
+
+virsh net-update default delete dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml --live >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh net-update default add dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml --live >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+
+log info "Updated host DNS."
 
 cat > OSE_${NODE_TYPE}_${NODE_NAME}.xml <<EOF
 <domain type="kvm" xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
@@ -237,22 +270,28 @@ cat > OSE_${NODE_TYPE}_${NODE_NAME}.xml <<EOF
 </domain>
 EOF
 
-virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml
-virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --disk path=${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT,format=$NODE_DISKFORMAT,bus=$NODE_DISKBUS,io=$NODE_DISKIO,cache=$NODE_DISKCACHE
-virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --network default,model=virtio
-virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --edit --cpu host,-invtsc
-virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --edit --vcpu ${NODE_VCPUS}
-virsh start OSE_${NODE_TYPE}_${NODE_NAME}
+virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --disk path=${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT,format=$NODE_DISKFORMAT,bus=$NODE_DISKBUS,io=$NODE_DISKIO,cache=$NODE_DISKCACHE >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --network default,model=virtio >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --edit --cpu host,-invtsc >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --edit --vcpu ${NODE_VCPUS} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
+log info "Created VM config."
+
+virsh start OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+
+log info "Starting VM for initial setup and configuration."
 rm -f $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg 
 
 sleep_while_vm running
 
-virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} hda --current
-virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} fd0 --current
+log info "Stopped VM."
+
+virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} hda --current >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} fd0 --current >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
 if [ "x${NODE_ATTACH_DISK}" != "x" ] ; then
-  virsh attach-disk OSE_${NODE_TYPE}_${NODE_NAME} ${NODE_ATTACH_DISK} vdb --type disk --driver qemu --subdriver qcow2 --cache directsync --targetbus virtio --mode shareable --config
+  virsh attach-disk OSE_${NODE_TYPE}_${NODE_NAME} ${NODE_ATTACH_DISK} vdb --type disk --driver qemu --subdriver qcow2 --cache directsync --targetbus virtio --mode shareable --config >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 fi
 
 virsh dumpxml OSE_${NODE_TYPE}_${NODE_NAME} > OSE_${NODE_TYPE}_${NODE_NAME}.xml
@@ -260,9 +299,10 @@ sed -i 's/<kernel>.*<\/kernel>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
 sed -i 's/<initrd>.*<\/initrd>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
 sed -i 's/<cmdline>.*<\/cmdline>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
 sed -i 's/<on_reboot>.*<\/on_reboot>/<on_reboot>restart<\/on_reboot>/g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
-virsh undefine OSE_${NODE_TYPE}_${NODE_NAME}
-virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml
+virsh undefine OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
 rm -f OSE_${NODE_TYPE}_${NODE_NAME}.xml /tmp/vmlinuz-ose /tmp/initrd.img-ose
 
-virsh start OSE_${NODE_TYPE}_${NODE_NAME}
+log info "Starting VM"
+virsh start OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1

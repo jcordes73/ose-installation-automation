@@ -8,6 +8,39 @@ function interrupt()
   exit
 }
 
+function log()
+{
+  DATE="`date`"
+  COLOR=""
+  case "$1" in
+    debug)
+      COLOR="" 
+    ;;
+    info)
+      COLOR="\x1B[01;94m"
+    ;;
+    warn)
+      COLOR="\x1B[01;93m"
+    ;;
+    error)
+      COLOR="\x1B[31m"
+    ;;
+  esac
+
+  echo -e "${COLOR}$1 $DATE $2\x1B[0m"
+}
+
+function show_usage() {
+  echo "Usage: ose-master-install-automated.sh <parameters>"
+  echo "  Mandatory parameters"
+  echo "    --rhn-username=<rhn-username>"
+  echo "    --rhn-password=<rhn-password>"
+  echo "    --pool-id=<subscription-pool-id>"
+  echo "    --root-password=<root-password>"
+  echo "  Optional parameters"
+  echo "    --local-repo-device=<local-repo-device>"
+}
+
 OPTS="$*"
 HOSTNAME="`hostname`"
 HOSTS="$HOSTNAME"
@@ -38,22 +71,26 @@ for opt in $OPTS ; do
 done
 
 if [ "x$RHN_USERNAME" = "x" ] ; then
-   echo "Mandatory parameter --rhn-username is missing"
+   log error "Mandatory parameter --rhn-username is missing"
+   show_usage
    exit
 fi
 
 if [ "x$RHN_PASSWORD" = "x" ] ; then
-   echo "Mandatory parameter --rhn-password is missing"
+   log error "Mandatory parameter --rhn-password is missing"
+   show_usage
    exit
 fi
 
 if [ "x$POOL_ID" = "x" ] ; then
-   echo "Mandatory parameter --pool-id is missing"
+   log error "Mandatory parameter --pool-id is missing"
+   show_usage
    exit
 fi
 
 if [ "x$ROOT_PASSWORD" = "x" ] ; then
-   echo "Mandatory parameter --root-password is missing"
+   log error "Mandatory parameter --root-password is missing"
+   show_usage
    exit
 fi
 
@@ -62,19 +99,25 @@ if [ -f "ose-installation-domain.cfg" ] ; then
   MASTERS="`grep ",master," ose-installation-domain.cfg | cut -d"," -f1`"
   MINIONS="`grep ",node," ose-installation-domain.cfg | cut -d"," -f1`"
 else
-  echo "Mandatory configuration-file ose-installation-domain.cfg missing."
+  log error "Mandatory configuration-file ose-installation-domain.cfg missing."
   exit
 fi
+
+log info "Starting OpenShift installation."
 
 # Get IP of system
 IP=`ifconfig eth0 | grep "inet " | awk '{print $2}'`
 echo "$IP $HOSTNAME" >> /etc/hosts
 
-firewall-cmd --zone=public --add-port=22/tcp --permanent
-firewall-cmd --reload
+log info "Setup /etc/hosts."
+
+firewall-cmd --zone=public --add-port=22/tcp --permanent >> ose_installation.log 2>&1
+firewall-cmd --reload >> ose_installation.log 2>&1
+
+log info "Setup firewall for SSH access."
 
 rm -f ~/.ssh/id_rsa
-ssh-keygen -t rsa -f ~/.ssh/id_rsa -N ""
+ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" >> ose_installation.log 2>&1
 cat > ./getpwd.sh <<EOF
 #!/bin/bash
 echo '$ROOT_PASSWORD'
@@ -84,8 +127,6 @@ chmod 0700 ./getpwd.sh
 export SSH_ASKPASS='./getpwd.sh'
 export DISPLAY=nodisplay
 cat > ~/.ssh/config <<EOF
-Host 192.168.122.*
-   StrictHostKeyChecking no
 Host $HOSTNAME
    StrictHostKeyChecking no
 EOF
@@ -96,31 +137,35 @@ Host $host
    StrictHostKeyChecking no
 EOF
 
-  setsid ssh-copy-id root@$host
+  setsid ssh-copy-id root@$host >> ose_installation.log 2>&1
 done
 rm -f ./getpwd.sh
 
+log info "Setup master and nodes for SSH access via keys."
+
 # Register master system, subscribe to OpenShift subscription
-subscription-manager remove --all
-subscription-manager unregister
-subscription-manager clean
+subscription-manager remove --all >> ose_installation.log 2>&1
+subscription-manager unregister >> ose_installation.log 2>&1
+subscription-manager clean >> ose_installation.log 2>&1
 
 if [ "x$LOCAL_REPO_DEVICE" = "x" ] ; then
-  subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD
-  subscription-manager attach --pool=$POOL_ID
+  subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD >> ose_installation.log 2>&1
+  subscription-manager attach --pool=$POOL_ID >> ose_installation.log 2>&1
 
-  subscription-manager repos --disable="*"
+  subscription-manager repos --disable="*" >> ose_installation.log 2>&1
   subscription-manager repos \
   --enable="rhel-7-server-rpms" \
   --enable="rhel-7-server-extras-rpms" \
   --enable="rhel-7-server-optional-rpms" \
-  --enable="rhel-7-server-ose-3.0-rpms"
+  --enable="rhel-7-server-ose-3.0-rpms" >> ose_installation.log 2>&1
 fi
+
+log info "Subscribed master $HOSTNAME to OpenShift."
 
 # Use locally synced repos to speed-up setup
 if [ ! "x$LOCAL_REPO_DEVICE" = "x" ] ; then
-  mkdir -p /mnt/local-repo
-  mount -w $LOCAL_REPO_DEVICE /mnt/local-repo
+  mkdir -p /mnt/local-repo >> ose_installation.log 2>&1
+  mount -w $LOCAL_REPO_DEVICE /mnt/local-repo >> ose_installation.log 2>&1
 
   SSL_CLIENT_KEY="`grep sslclientkey /etc/yum.repos.d/redhat.repo | sort -u | cut -d"=" -f2`"
   SSL_CLIENT_CERT="`grep sslclientcert /etc/yum.repos.d/redhat.repo | sort -u | cut -d"=" -f2`"
@@ -191,31 +236,35 @@ fi
 # Register node systems, subscribe them to OpenShift subscription
 for node in $MINIONS ; do
   if [ "$node" != "$HOSTNAME" ] ; then
-    ssh root@$node "subscription-manager remove --all"
-    ssh root@$node "subscription-manager unregister"
-    ssh root@$node "subscription-manager clean"
+    ssh root@$node "subscription-manager remove --all" >> ose_installation.log 2>&1
+    ssh root@$node "subscription-manager unregister" >> ose_installation.log 2>&1
+    ssh root@$node "subscription-manager clean" >> ose_installation.log 2>&1
 
     if [ "x$LOCAL_REPO_DEVICE" = "x" ] ; then
-      ssh root@$node "subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD"
-      ssh root@$node "subscription-manager attach --pool=$POOL_ID"
-      ssh root@$node "subscription-manager repos --disable="*""
+      ssh root@$node "subscription-manager register --username=$RHN_USERNAME --password=$RHN_PASSWORD" >> ose_installation.log 2>&1
+      ssh root@$node "subscription-manager attach --pool=$POOL_ID" >> ose_installation.log 2>&1
+      ssh root@$node "subscription-manager repos --disable="*"" >> ose_installation.log 2>&1
       ssh root@$node "subscription-manager repos \
     --enable="rhel-7-server-rpms" \
     --enable="rhel-7-server-extras-rpms" \
     --enable="rhel-7-server-optional-rpms" \
-    --enable="rhel-7-server-ose-3.0-rpms""
+    --enable="rhel-7-server-ose-3.0-rpms"" >> ose_installation.log 2>&1
     else
-      scp /etc/yum.repos.d/ose-local.repo root@$node:/etc/yum.repos.d
-      ssh root@$node "rm -f /etc/yum.repos.d/redhat.repo"
-      ssh root@$node "yum clean all"
-      ssh root@$node "mkdir -p /mnt/local-repo"
-      ssh root@$node "mount -w $LOCAL_REPO_DEVICE /mnt/local-repo"
+      scp /etc/yum.repos.d/ose-local.repo root@$node:/etc/yum.repos.d >> ose_installation.log 2>&1
+      ssh root@$node "rm -f /etc/yum.repos.d/redhat.repo" >> ose_installation.log 2>&1
+      ssh root@$node "yum clean all" >> ose_installation.log 2>&1
+      ssh root@$node "mkdir -p /mnt/local-repo" >> ose_installation.log 2>&1
+      ssh root@$node "mount -w $LOCAL_REPO_DEVICE /mnt/local-repo" >> ose_installation.log 2>&1
     fi
+
+    log info "Subscribed node $node to OpenShift."
   fi
 done
 
 # Install networking tools
-yum install -y wget git net-tools bind-utils iptables-services bridge-utils
+yum install -y wget git net-tools bind-utils iptables-services bridge-utils >> ose_installation.log 2>&1
+
+log info "Installed networking tools."
 
 #cat > /etc/named.conf <<EOF
 #options {
@@ -254,29 +303,29 @@ yum install -y wget git net-tools bind-utils iptables-services bridge-utils
 #systemctl enable named
 
 # Install docker
-yum install -y docker
+yum install -y docker >> ose_installation.log 2>&1
 
 echo "VG=vg-docker" >> /etc/sysconfig/docker-storage-setup
-docker-storage-setup
+docker-storage-setup >> ose_installation.log 2>&1
 
-systemctl stop docker
+systemctl stop docker >> ose_installation.log 2>&1
 rm -rf /var/lib/docker/*
-systemctl restart docker
+systemctl restart docker >> ose_installation.log 2>&1
 
 if [ ! "x$LOCAL_REPO_DEVICE" = "x" ] ; then
   DOCKERIMAGES="`ls /mnt/local-repo/docker-images`"
   for dockerimage in $DOCKERIMAGES ; do docker load -i /mnt/local-repo/docker-images/${dockerimage} ; done
 fi
 
-# Create openshift user
-yum install -y python-virtualenv gcc
+log info "Installed docker."
 
-# Register and subscribe minions
+# Create openshift user
+yum install -y python-virtualenv gcc >> ose_installation.log 2>&1
 
 # Start OSE installation (using ansible)
-yum -y install https://dl.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-5.noarch.rpm
+yum -y install https://dl.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-5.noarch.rpm >> ose_installation.log 2>&1
 sed -i -e "s/^enabled=1/enabled=0/" /etc/yum.repos.d/epel.repo
-yum -y --enablerepo=epel install ansible
+yum -y --enablerepo=epel install ansible >> ose_installation.log 2>&1
 
 # Create an OSEv3 group that contains the masters and nodes groups" > /etc/ansible/hosts
 cat > /etc/ansible/hosts <<EOF
@@ -323,34 +372,43 @@ EOF
 done
 
 cd ~
-git clone https://github.com/openshift/openshift-ansible
+git clone https://github.com/openshift/openshift-ansible >> ose_installation.log 2>&1
 cd openshift-ansible
-ansible-playbook playbooks/byo/config.yml
+
+log info "Starting ansible deployment."
+ansible-playbook playbooks/byo/config.yml >> ose_installation.log 2>&1
+log info "Finished ansible deployment."
 
 # Add user
-htpasswd -b /etc/openshift/openshift-passwd test 'redhat2015!'
+htpasswd -b /etc/openshift/openshift-passwd test 'redhat2015!' >> ose_installation.log 2>&1
+log info "Created demo user test."
 
 echo \
     '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"registry"}}' \
-    | oc create -n default -f -
+    | oc create -n default -f - >> ose_installation.log 2>&1
 
 # Add a docker user (this should be updated in the doc's to enable automation)
-oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:registry",'| oc replace scc -f -
+oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:registry",'| oc replace scc -f - >> ose_installation.log 2>&1
 
 oadm registry --service-account=registry \
      --config=/etc/openshift/master/admin.kubeconfig \
      --credentials=/etc/openshift/master/openshift-registry.kubeconfig \
      --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
-     --mount-host=/docker-registry
+     --mount-host=/docker-registry >> ose_installation.log 2>&1
+
+log info "Created docker registry."
 
 # Deploy a router
 echo \
     '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"router"}}' \
-    | oc create -f -
+    | oc create -f - >> ose_installation.log 2>&1
 
-oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:router",'| oc replace scc -f -
+oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:router",'| oc replace scc -f - >> ose_installation.log 2>&1
 
 oadm router router --replicas=1 \
     --credentials='/etc/openshift/master/openshift-router.kubeconfig' \
     --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
-    --service-account=router
+    --service-account=router >> ose_installation.log 2>&1
+
+log info "Deployed router."
+log info "Finished OpenShift installation."
