@@ -32,16 +32,18 @@ function show_usage() {
   echo "    --ip=<host-ip>"
   echo "    --hostname=<host-name>"
   echo "    --root-pw=<root-password>"
+  echo "    --rhn-username=<rhn-username>"
+  echo "    --rhn-password=<rhn-password>"
+  echo "    --pool-id=<pool-id>"
   echo "  Optional parameters"
   echo "    --lang=<locale>"
   echo "    --keyboard=<keyboard-type>"
   echo "    --timezone=<timezone>"
-  echo "    --vm-disk-format=<vm-disk-format> (either qcow2 or raw)"
-  echo "    --vm-disk-io=<vm-disk-io-mode> (either default, native or threads)"
+  echo "    --vm-disk-format=<vm-disk-format> (either qcow2 or raw which is default)"
+  echo "    --vm-disk-io=<vm-disk-io-mode> (either default, threads, or native which is default)"
   echo "    --vcpus=<#vcpus> (default is 2)"
   echo "    --memory=<RAM in MB> (default is 4096)"
   echo "    --node-type=master|node (default is master)"
-  echo "    --attach-disk=<disk-image>"
   echo "    --enable-data-plane=<yes|no> (it's disabled by default)"
 }
 
@@ -76,8 +78,8 @@ NODE_KEYBOARD=`localectl | grep "VC Keymap" | sed 's/.*: \(.*\)/\1/g'`
 NODE_TIMEZONE="`timedatectl | grep -i Time | grep -i zone | cut -d":" -f2 | cut -d" " -f2`"
 NODE_VCPUS=2
 NODE_MEMORY=4096
-NODE_DISKSIZE=80G
-NODE_DISKFORMAT="qcow2"
+NODE_DISKSIZE=105G
+NODE_DISKFORMAT="raw"
 NODE_DISKBUS="virtio"
 NODE_DISKIO="native"
 NODE_DISKCACHE="directsync"
@@ -86,6 +88,8 @@ NODE_ROOT_PASSWORD=""
 NODE_DATA_PLANE="off"
 
 DIRNAME=`dirname "$0"`
+
+BRIDGE_DEV="br0"
 
 OPTS="$*"
 for opt in $OPTS ; do 
@@ -127,9 +131,6 @@ for opt in $OPTS ; do
   --timezone=*)
      NODE_TIMEZONE=$VALUE
   ;;
-  --attach-disk=*)
-     NODE_ATTACH_DISK=$VALUE
-  ;;
   --root-pw=*)
      NODE_ROOT_PASSWORD="$VALUE"
   ;;
@@ -137,6 +138,15 @@ for opt in $OPTS ; do
      if [ "$VALUE" = "yes" ] ; then
        NODE_DATA_PLANE="on"
      fi
+  ;;
+  --rhn-username=*)
+     RHN_USERNAME=$VALUE
+  ;;
+  --rhn-password=*)
+     RHN_PASSWORD=$VALUE
+  ;;
+  --pool-id=*)
+     POOL_ID=$VALUE
   ;;
   esac
 done
@@ -171,10 +181,30 @@ if [ "x$NODE_ROOT_PASSWORD" = "x" ] ; then
   exit
 fi
 
+if [ "x$RHN_USERNAME" = "x" ] ; then
+  log error "Mandatory parameter --rhn-username missing"
+  show_usage
+  exit
+fi
+
+if [ "x$RHN_PASSWORD" = "x" ] ; then
+  log error "Mandatory parameter --rhn-password missing"
+  show_usage
+  exit
+fi
+
+if [ "x$POOL_ID" = "x" ] ; then
+  log error "Mandatory parameter --pool-id missing"
+  show_usage
+  exit
+fi
+
 if [ "$NODE_TYPE" = "node" ] ; then
   NODE_DISKSIZE=45G
 fi
 
+GATEWAY_IP="`ifconfig -v | grep -1 -e "^br0:" | grep "inet " | awk '{print $2}'`"
+DNS_HOST="`nslookup www.google.com | grep "Server:" | awk '{print $2}'`" 
 NODE_NAME=`echo $NODE_HOSTNAME | cut -d"." -f1`
 
 log info "Creating VM for OpenShift $NODE_TYPE with $NODE_VCPUS vcpus, ${NODE_MEMORY}kb memory and $NODE_DISKSIZE of storage."
@@ -186,7 +216,12 @@ sed "s/NODE_HOSTNAME/$NODE_HOSTNAME/g" | \
 sed "s/NODE_LANG/$NODE_LANG/g" | \
 sed "s/NODE_KEYBOARD/$NODE_KEYBOARD/g" | \
 sed "s/NODE_TIMEZONE/$(echo $NODE_TIMEZONE | sed -e 's/[\/&]/\\&/g')/g" | \
-sed "s/NODE_ROOT_PASSWORD/$NODE_ROOT_PASSWORD/g" \
+sed "s/NODE_ROOT_PASSWORD/$NODE_ROOT_PASSWORD/g" | \
+sed "s/GATEWAY_IP/$GATEWAY_IP/g" | \
+sed "s/DNS_HOST/$DNS_HOST/g" | \
+sed "s/RHN_USERNAME/$RHN_USERNAME/g" | \
+sed "s/RHN_PASSWORD/$RHN_PASSWORD/g" | \
+sed "s/POOL_ID/$POOL_ID/g" \
 > $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg
 
 log info "Created kickstart config."
@@ -214,10 +249,12 @@ qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NO
 
 log info "Created VM image."
 
+virsh net-autostart default >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh net-start default >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 virsh net-update default delete dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml --live >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 virsh net-update default add dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml --live >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
-log info "Updated host DNS."
+log info "Updated default network."
 
 cat > OSE_${NODE_TYPE}_${NODE_NAME}.xml <<EOF
 <domain type="kvm" xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
@@ -270,6 +307,8 @@ cat > OSE_${NODE_TYPE}_${NODE_NAME}.xml <<EOF
 </domain>
 EOF
 
+virsh destroy OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh undefine OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --disk path=${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT,format=$NODE_DISKFORMAT,bus=$NODE_DISKBUS,io=$NODE_DISKIO,cache=$NODE_DISKCACHE >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --network default,model=virtio >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
@@ -289,10 +328,6 @@ log info "Stopped VM."
 
 virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} hda --current >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} fd0 --current >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-
-if [ "x${NODE_ATTACH_DISK}" != "x" ] ; then
-  virsh attach-disk OSE_${NODE_TYPE}_${NODE_NAME} ${NODE_ATTACH_DISK} vdb --type disk --driver qemu --subdriver qcow2 --cache directsync --targetbus virtio --mode shareable --config >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-fi
 
 virsh dumpxml OSE_${NODE_TYPE}_${NODE_NAME} > OSE_${NODE_TYPE}_${NODE_NAME}.xml
 sed -i 's/<kernel>.*<\/kernel>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml

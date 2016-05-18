@@ -1,8 +1,9 @@
 lang NODE_LANG
 keyboard --vckeymap=NODE_KEYBOARD --xlayouts='NODE_KEYBOARD'
 timezone NODE_TIMEZONE --isUtc
-network --device=eth0 --bootproto=static --ip=NODE_IP --netmask=255.255.255.0 --gateway=192.168.122.1 --nameserver=192.168.122.1 --hostname=NODE_HOSTNAME --activate --ipv6=auto
-rootpw NODE_ROOT_PASSWORD 
+network --device=eth0 --bootproto=static --ip=NODE_IP --netmask=255.255.255.0 --gateway=192.168.122.1 --nameserver=192.168.122.1 --hostname=NODE_HOSTNAME --activate --ipv6=auto --onboot=yes
+rootpw NODE_ROOT_PASSWORD
+firewall --service=ssh
 text
 cdrom
 bootloader --location=mbr --append="rhgb quiet crashkernel=auto"
@@ -19,6 +20,23 @@ selinux --enforcing
 firewall --enabled
 firstboot --disable
 %packages
-@base
+@Base
+%end
+%post
+echo "Registering system."
+subscription-manager register --username='RHN_USERNAME' --password='RHN_PASSWORD'
+echo "Attaching OpenShift Enterprise subscription."
+subscription-manager attach --pool=POOL_ID
+subscription-manager repos --disable="*"
+subscription-manager repos --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-optional-rpms" --enable="rhel-7-server-ose-3.2-rpms"
+echo "Installing additional software."
+yum install -y deltarpm
+yum update -y
+yum install -y wget git net-tools bind-utils bind-chroot iptables-services bridge-utils
+yum install -y docker
+yum install -y python-virtualenv gcc
+yum -y install https://dl.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-5.noarch.rpm
+sed -i -e "s/^enabled=1/enabled=0/" /etc/yum.repos.d/epel.repo
+yum -y --enablerepo=epel install ansible
 %end
 reboot
