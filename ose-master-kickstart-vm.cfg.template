@@ -1,8 +1,9 @@
 lang NODE_LANG
 keyboard --vckeymap=NODE_KEYBOARD --xlayouts='NODE_KEYBOARD'
 timezone NODE_TIMEZONE --isUtc
-network --device=eth0 --bootproto=static --ip=NODE_IP --netmask=255.255.255.0 --gateway=192.168.122.1 --nameserver=192.168.122.1 --hostname=NODE_HOSTNAME --activate --ipv6=auto
+network --device=eth0 --bootproto=static --ip=NODE_IP --netmask=255.255.255.0 --gateway=192.168.122.1 --nameserver=192.168.122.1 --hostname=NODE_HOSTNAME --activate --ipv6=auto --onboot=yes
 rootpw NODE_ROOT_PASSWORD
+firewall --service=ssh
 text
 cdrom
 bootloader --location=mbr --append="rhgb quiet crashkernel=auto"
@@ -10,20 +11,35 @@ zerombr
 clearpart --all --initlabel
 part /boot --fstype ext4 --size=500 --ondisk=vda --asprimary
 part pv.openshift --size=40960 --ondisk=vda --grow
-part pv.docker --size=15360 --ondisk=vda
-part pv.dockerregistry --size=20280 --ondisk=vda
+part pv.docker --size=30720 --ondisk=vda
+part pv.dockerregistry --size=30520 --ondisk=vda
 volgroup vg-openshift pv.openshift
 volgroup vg-docker pv.docker
 volgroup vg-dockerregistry pv.dockerregistry
 logvol / --fstype ext4 --name=root --vgname=vg-openshift --size=20280 --grow
 logvol /home --fstype ext4 --name=home --vgname=vg-openshift --size=10240
 logvol swap --fstype swap --name=swap --vgname=vg-openshift --size=4096
-logvol /docker-registry --fstype ext4 --name=dockerregistry --vgname=vg-dockerregistry --size=18000
+logvol /docker-registry --fstype ext4 --name=dockerregistry --vgname=vg-dockerregistry --size=28000
 auth --passalgo=sha512 --useshadow
 selinux --enforcing
 firewall --enabled
 firstboot --disable
 %packages
-@base
+@Base
+%end
+%post
+echo "Registering system."
+subscription-manager register --username='RHN_USERNAME' --password='RHN_PASSWORD'
+echo "Attaching OpenShift Enterprise subscription."
+subscription-manager attach --pool=POOL_ID
+subscription-manager repos --disable="*"
+subscription-manager repos --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-optional-rpms" --enable="rhel-7-server-ose-3.1-rpms"
+echo "Installing additional software."
+yum install -y deltarpm
+yum update -y
+yum install -y wget git net-tools bind-utils bind-chroot iptables-services bridge-utils
+yum install -y docker
+yum install -y python-virtualenv gcc
+yum install -y ansible
 %end
 reboot

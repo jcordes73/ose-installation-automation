@@ -1,4 +1,4 @@
-OpenShift Enterprise v3 Automated Installation
+OpenShift Enterprise v3.1 Automated Installation
 ============================
 The OpenShift Enterprise v3.1 Automated Installation package provides a set of tools to
 
