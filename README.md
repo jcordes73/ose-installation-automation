@@ -63,7 +63,7 @@ openshift.example.com openshift_node_labels="{'region': 'primary', 'zone': 'defa
 ```
 
 ### Master/Node installation
-To install a master (and if specified, nodes) copy the files **ose-install.sh** and **ose-install-domain.cfg** to the box you want to install it on and run the following command
+To install a master (and if specified, nodes) copy the files **ose-install.sh** and **ose-install.cfg** to the box you want to install it on and run the following command
 ```
 ./ose-install.sh --root-password='<root-password>'
 ```
