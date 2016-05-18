@@ -190,7 +190,7 @@ git clone https://github.com/openshift/openshift-ansible >> ose-install.log 2>&1
 export PYTHONUNBUFFERED=1
 ansible-playbook -v openshift-ansible/playbooks/byo/config.yml >> ose-install.log 2>&1
 
-sed -i "s/bindAddress: .*:53/s/bindAddress: $IP:53" /etc/openshift/master/master-config.yaml
+sed -i "s/bindAddress: .*:53/bindAddress: $IP:53" /etc/openshift/master/master-config.yaml
 systemctl restart atomic-openshift-master.service
 
 log info "Finished ansible deployment."
