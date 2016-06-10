@@ -4,7 +4,7 @@ trap interrupt 1 2 3 6 9 15
 
 function interrupt()
 {
-  echo "OpenShift Enterprise v3.2 installation aborted"
+  echo "OpenShift Enterprise v3.1 installation aborted"
   exit
 }
 
@@ -126,10 +126,10 @@ else
   exit
 fi
 
-log info "Starting OpenShift Enterprise v3.2 installation."
+log info "Starting OpenShift Enterprise v3.1 installation."
 
 # Get IP of system
-IP=`ifconfig eth0 | grep "inet " | awk '{print $2}'`
+IP=` nslookup $HOSTNAME | grep -1 $HOSTNAME | grep Address | cut -d' ' -f2`
 echo "$IP $HOSTNAME" >> /etc/hosts
 
 log info "Setup /etc/hosts."
@@ -174,11 +174,11 @@ systemctl restart docker >> ose-install.log 2>&1
 log info "Installed docker."
 
 # Create master wildcard certificate
-CA=/etc/openshift/master
-mkdir -p $CA
-openssl req -newkey rsa:4096 -days 365 -nodes -x509 -subj "/C=DE/ST=NRW/L=Düsseldorf/O=Example/CN=*.${DOMAIN}/subjectAltName=DNS.1=*.${DOMAIN},DNS.2=subjectAltName=*.apps.${DOMAIN}" -keyout $CA/ca.key -out $CA/ca.crt >> ose-install.log 2>&1
-echo '01' > $CA/ca.serial.txt
-chmod -w $CA/ca.*
+CA=/etc/origin/master
+#mkdir -p $CA
+#openssl req -newkey rsa:4096 -days 365 -nodes -x509 -subj "/C=DE/ST=NRW/L=Düsseldorf/O=Example/CN=*.${DOMAIN}/subjectAltName=DNS.1=*.${DOMAIN},DNS.2=subjectAltName=*.apps.${DOMAIN}" -keyout $CA/ca.key -out $CA/ca.crt >> ose-install.log 2>&1
+#echo '01' > $CA/ca.serial.txt
+#chmod -w $CA/ca.*
 
 # Start ansible deployment
 log info "Starting deployment via Ansible"
@@ -190,35 +190,35 @@ git clone https://github.com/openshift/openshift-ansible >> ose-install.log 2>&1
 export PYTHONUNBUFFERED=1
 ansible-playbook -v openshift-ansible/playbooks/byo/config.yml >> ose-install.log 2>&1
 
-sed -i "s/bindAddress: .*:53/bindAddress: $IP:53" /etc/openshift/master/master-config.yaml
+sed -i "s/bindAddress: .*:53/bindAddress: $IP:53/" /etc/origin/master/master-config.yaml
 systemctl restart atomic-openshift-master.service
 
 log info "Finished ansible deployment."
 
 # Add user
-htpasswd -b /etc/openshift/openshift-passwd demo 'redhat2016!' >> ose-install.log 2>&1
+htpasswd -c -b /etc/origin/openshift-passwd demo 'redhat2016!' >> ose-install.log 2>&1
 log info "Created user demo."
-htpasswd -b /etc/openshift/openshift-passwd admin 'redhat2016!' >> ose-install.log 2>&1
+htpasswd -b /etc/origin/openshift-passwd admin 'redhat2016!' >> ose-install.log 2>&1
 oadm policy add-role-to-user system:registry admin
 oadm policy add-role-to-user admin admin -n openshift
 oadm policy add-role-to-user system:image-builder admin
 log info "Created user admin."
 
 # Add a registry
-echo \
-    '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"registry"}}' \
-    | oc create -n default -f - >> ose-install.log 2>&1
+#echo \
+#    '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"registry"}}' \
+#    | oc create -n default -f - >> ose-install.log 2>&1
 
-oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:registry",'| oc replace scc -f - >> ose-install.log 2>&1
+#oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:registry",'| oc replace scc -f - >> ose-install.log 2>&1
 
 # Fix for https://github.com/openshift/origin/issues/6751
-chown -R 1001.1405 /docker-registry
+chown -R 1001:root /docker-registry
 
 oadm registry --service-account=registry \
-     --config=/etc/openshift/master/admin.kubeconfig \
-     --credentials=/etc/openshift/master/openshift-registry.kubeconfig \
-     --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
-     --mount-host=/docker-registry >> ose-install.log 2>&1
+    --config=/etc/origin/master/admin.kubeconfig \
+    --credentials=/etc/origin/master/openshift-registry.kubeconfig \
+    --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
+    --mount-host=/docker-registry >> ose-install.log 2>&1
 
 REGISTRY_DC="docker-registry"
 REGISTRY_NAME="`oc get service ${REGISTRY_DC} | tail -1 | awk '{print $1}'`"
@@ -229,8 +229,6 @@ oadm ca create-server-cert --signer-cert=$CA/ca.crt \
      --signer-key=$CA/ca.key --signer-serial=$CA/ca.serial.txt \
      --hostnames="${REGISTRY_DC}.${DOMAIN},${REGISTRY_DC}.default.svc.cluster.local,${REGISTRY_IP}" \
      --cert=$CA/registry.crt --key=$CA/registry.key
-
-cat $CA/registry.crt $CA/registry.key $CA/ca.crt > $CA/registry.pem
 
 oc project default >> ose-install.log 2>&1
 
@@ -251,11 +249,11 @@ cp $CA/ca.crt /etc/docker/certs.d/docker-registry.default.svc.cluster.local:5000
 mkdir -p /etc/docker/certs.d/${REGISTRY_DC}.${DOMAIN}:${REGISTRY_PORT}
 cp $CA/ca.crt /etc/docker/certs.d/${REGISTRY_DC}.${DOMAIN}:${REGISTRY_PORT}
 
-#sed -i "/.*# INSECURE_REGISTRY.*/aINSECURE_REGISTRY=\"--insecure-registry 172.30.0.0\/16\"" /etc/sysconfig/docker
+sed -i "/.*# INSECURE_REGISTRY.*/aINSECURE_REGISTRY=\"--insecure-registry 172.30.0.0\/16\"" /etc/sysconfig/docker
 sudo systemctl daemon-reload
 sudo systemctl restart docker
 
-log info "Deployed secured registry."
+log info "Deployed registry."
 
 # Deploy a router
 echo \
@@ -272,10 +270,11 @@ oadm ca create-server-cert --signer-cert=$CA/ca.crt \
 cat $CA/apps.crt $CA/apps.key $CA/ca.crt > $CA/apps.pem
 
 oadm router router --replicas=1 \
-    --default-cert=$CA/apps.pem \
-    --credentials='/etc/openshift/master/openshift-router.kubeconfig' \
+    --service-account=router \
+    --config=/etc/origin/master/admin.kubeconfig \
+    --credentials='/etc/origin/master/openshift-router.kubeconfig' \
     --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
-    --service-account=router >> ose-install.log 2>&1
+    --default-cert=$CA/apps.pem >> ose-install.log 2>&1
 
 log info "Deployed router."
 
@@ -341,7 +340,7 @@ sleep 20
 oc scale dc/logging-fluentd --replicas=1 >> ose-install.log 2>&1
 oc scale rc/logging-fluentd-1 --replicas=1 >> ose-install.log 2>&1
 wait_for_pod "logging-fluentd" "Running"
-sed -i "/assetConfig:/a\ \ loggingPublicURL: \"https:\/\/kibana.apps.${DOMAIN}:${MASTER_HTTPS_PORT}\"" /etc/openshift/master/master-config.yaml
+sed -i "/assetConfig:/a\ \ loggingPublicURL: \"https:\/\/kibana.apps.${DOMAIN}:${MASTER_HTTPS_PORT}\"" /etc/origin/master/master-config.yaml
 oadm policy add-role-to-user admin admin -n logging
 
 log info "Created central logging."
@@ -354,7 +353,7 @@ oadm policy add-role-to-user edit system:serviceaccount:openshift-infra:metrics-
 oadm policy add-cluster-role-to-user cluster-reader system:serviceaccount:openshift-infra:heapster >> ose-install.log 2>&1
 oc secrets new metrics-deployer nothing=/dev/null >> ose-install.log 2>&1
 oc process -f openshift-ansible/roles/openshift_examples/files/examples/v1.1/infrastructure-templates/enterprise/metrics-deployer.yaml -v HAWKULAR_METRICS_HOSTNAME=metrics.apps.${DOMAIN},MASTER_URL=https://openshift.${DOMAIN}:${MASTER_HTTPS_PORT},USE_PERSISTENT_STORAGE=false | oc create -f - >> ose-install.log 2>&1
-sed -i "/assetConfig:/a\ \ metricsPublicURL: \"https://metrics.apps.${DOMAIN}:${MASTER_HTTPS_PORT}/hawkular/metrics\"" /etc/openshift/master/master-config.yaml
+sed -i "/assetConfig:/a\ \ metricsPublicURL: \"https://metrics.apps.${DOMAIN}:${MASTER_HTTPS_PORT}/hawkular/metrics\"" /etc/origin/master/master-config.yaml
 
 wait_for_pod "metrics-deployer" "Completed"
 wait_for_pod "hawkular-cassandra" "Running"

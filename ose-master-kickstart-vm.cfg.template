@@ -40,6 +40,6 @@ yum update -y
 yum install -y wget git net-tools bind-utils bind-chroot iptables-services bridge-utils
 yum install -y docker
 yum install -y python-virtualenv gcc
-yum install ansible
+yum install -y ansible
 %end
 reboot
