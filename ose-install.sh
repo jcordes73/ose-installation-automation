@@ -175,10 +175,6 @@ log info "Installed docker."
 
 # Create master wildcard certificate
 CA=/etc/origin/master
-#mkdir -p $CA
-#openssl req -newkey rsa:4096 -days 365 -nodes -x509 -subj "/C=DE/ST=NRW/L=Düsseldorf/O=Example/CN=*.${DOMAIN}/subjectAltName=DNS.1=*.${DOMAIN},DNS.2=subjectAltName=*.apps.${DOMAIN}" -keyout $CA/ca.key -out $CA/ca.crt >> ose-install.log 2>&1
-#echo '01' > $CA/ca.serial.txt
-#chmod -w $CA/ca.*
 
 # Start ansible deployment
 log info "Starting deployment via Ansible"
@@ -205,11 +201,6 @@ oadm policy add-role-to-user system:image-builder admin
 log info "Created user admin."
 
 # Add a registry
-#echo \
-#    '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"registry"}}' \
-#    | oc create -n default -f - >> ose-install.log 2>&1
-
-#oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:registry",'| oc replace scc -f - >> ose-install.log 2>&1
 
 # Fix for https://github.com/openshift/origin/issues/6751
 chown -R 1001:root /docker-registry
