@@ -174,7 +174,7 @@ systemctl restart docker >> ose-install.log 2>&1
 log info "Installed docker."
 
 # Create master wildcard certificate
-CA=/etc/openshift/master
+CA=/etc/origin/master
 
 # Start ansible deployment
 log info "Starting deployment via Ansible"
