@@ -45,27 +45,23 @@ function show_usage() {
 }
 
 function wait_for_pod() {
-  if [ "x$3" = "x" ]; then
-    POD_NAME="`oc get pods | grep $1 | awk '{print $1}'`"
-  else
-    POD_NAME_EXCLUDE="`echo $3 | sed 's/,/\\|/g'`"
-    POD_NAME="`oc get pods | grep $1 | grep -v "$POD_NAME_EXCLUDE" | awk '{print $1}'`"
-  fi
+  POD_NAME=""
 
   while [ "x$POD_NAME" = "x" ]; do
-    sleep 10
+    sleep 5
     if [ "x$POD_NAME_EXCLUDE" = "x" ]; then
-      POD_NAME="`oc get pods | grep $1 | awk '{print $1}'`"
+      POD_NAME="`oc get pods | grep -v NAME | grep "$1" | awk '{print $1}'`"
     else
-      POD_NAME="`oc get pods | grep $1 | grep -v "$POD_NAME_EXCLUDE" | awk '{print $1}'`"
+      POD_NAME="`oc get pods | grep -v NAME | grep "$1" | grep -v "$POD_NAME_EXCLUDE" | awk '{print $1}'`"
     fi
   done
 
-  POD_STATUS="`oc get pod $POD_NAME| grep $POD_NAME | awk '{print $3}'`"
+  POD_STATUS="`oc get pod $POD_NAME| grep "$POD_NAME" | grep -v NAME | awk '{print $3}'`"
     
   while [ "x$POD_STATUS" != "x" ] && [ "$POD_STATUS" != "$2" ]; do
     sleep 10
-    POD_STATUS="`oc get pod $POD_NAME | grep $POD_NAME | awk '{print $3}'`"
+    POD="`oc get pod $POD_NAME`"
+    POD_STATUS="`echo $POD | grep "$POD_NAME" | grep -v NAME | awk '{print $3}'`"
   done
 }
 
@@ -181,17 +177,15 @@ log info "Starting deployment via Ansible"
 
 mkdir -p /etc/ansible
 cp ose-install.cfg /etc/ansible/hosts
-rm -rf openshift-ansible
-git clone https://github.com/openshift/openshift-ansible >> ose-install.log 2>&1
-export PYTHONUNBUFFERED=1
-ansible-playbook -v openshift-ansible/playbooks/byo/config.yml >> ose-install.log 2>&1
+yum install -y atomic-openshift-utils >> ose-install.log 2>&1
+ansible-playbook -v /usr/share/ansible/openshift-ansible/playbooks/byo/config.yml >> ose-install.log 2>&1
 
 sed -i "s/bindAddress: .*:53/bindAddress: $IP:53/" /etc/origin/master/master-config.yaml
 systemctl restart atomic-openshift-master.service
 
 log info "Finished ansible deployment."
 
-# Add user
+# Add users
 htpasswd -c -b /etc/origin/openshift-passwd demo 'redhat2016!' >> ose-install.log 2>&1
 log info "Created user demo."
 htpasswd -b /etc/origin/openshift-passwd admin 'redhat2016!' >> ose-install.log 2>&1
@@ -199,11 +193,15 @@ oadm policy add-role-to-user system:registry admin
 oadm policy add-role-to-user admin admin -n openshift
 oadm policy add-role-to-user system:image-builder admin
 log info "Created user admin."
+htpasswd -b /etc/origin/openshift-passwd developer 'redhat2016!' >> ose-install.log 2>&1
+log info "Created user developer."
+htpasswd -b /etc/origin/openshift-passwd tester 'redhat2016!' >> ose-install.log 2>&1
+log info "Created user tester."
 
 # Add a registry
 
 # Fix for https://github.com/openshift/origin/issues/6751
-chown -R 1001.1405 /docker-registry
+chown -R 1001:root /docker-registry
 
 oadm registry --service-account=registry \
     --config=/etc/origin/master/admin.kubeconfig \
@@ -224,12 +222,12 @@ oadm ca create-server-cert --signer-cert=$CA/ca.crt \
 oc project default >> ose-install.log 2>&1
 
 oc secrets new registry-secret $CA/registry.crt $CA/registry.key >> ose-install.log 2>&1
+oc secrets add serviceaccounts/registry secrets/registry-secret >> ose-install.log 2>&1
 oc secrets add serviceaccounts/default secrets/registry-secret >> ose-install.log 2>&1
 oc volume dc/${REGISTRY_DC} --add --type=secret --secret-name=registry-secret -m /etc/secrets >> ose-install.log 2>&1
 oc env dc/${REGISTRY_DC} REGISTRY_HTTP_TLS_CERTIFICATE=/etc/secrets/registry.crt REGISTRY_HTTP_TLS_KEY=/etc/secrets/registry.key >> ose-install.log 2>&1
-oc patch dc/docker-registry --api-version=v1 -p '{"spec": {"template": {"spec": {"containers":[{"name":"registry","livenessProbe":  {"httpGet": {"scheme":"HTTPS"}}}]}}}}' >> ose-install.log 2>&1
-
-wait_for_pod "docker-registry" "Running" "deploy"
+oc patch dc/docker-registry -p '{"spec": {"template": {"spec": {"containers":[{"name":"registry","livenessProbe":  {"httpGet": {"scheme":"HTTPS"}}}]}}}}' >> ose-install.log 2>&1
+oc patch dc/docker-registry -p '{"spec": {"template": {"spec": {"containers":[{"name":"registry","readinessProbe":  {"httpGet": {"scheme":"HTTPS"}}}]}}}}' >> ose-install.log 2>&1
 
 mkdir -p /etc/docker/certs.d/${REGISTRY_IP}:${REGISTRY_PORT}
 cp $CA/ca.crt /etc/docker/certs.d/${REGISTRY_IP}:${REGISTRY_PORT}
@@ -243,6 +241,8 @@ cp $CA/ca.crt /etc/docker/certs.d/${REGISTRY_DC}.${DOMAIN}:${REGISTRY_PORT}
 sed -i "/.*# INSECURE_REGISTRY.*/aINSECURE_REGISTRY=\"--insecure-registry 172.30.0.0\/16\"" /etc/sysconfig/docker
 sudo systemctl daemon-reload
 sudo systemctl restart docker
+
+wait_for_pod "docker-registry" "Running" "deploy"
 
 log info "Deployed registry."
 
@@ -314,24 +314,25 @@ echo \
 oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:jboss",'| oc replace scc -f - >> ose-install.log 2>&1
 
 # Central logging
-oc new-project logging  >> ose-install.log 2>&1
+oadm new-project logging --node-selector="" >> ose-install.log 2>&1
 oc project logging  >> ose-install.log 2>&1
 oc secrets new logging-deployer kibana.crt=$CA/apps.crt kibana.key=$CA/apps.key ca.crt=$CA/ca.crt ca.key=$CA/ca.key >> ose-install.log 2>&1
+echo '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"logging-deployer"},"secrets":[{"name":"logging-deployer"}]}' | oc create -f - >> ose-install.log 2>&1
 oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:logging:logging-deployer",'| oc replace scc -f -  >> ose-install.log 2>&1
-echo '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"logging-deployer","namespace":"logging"},"secrets":[{"name":"logging-deployer"}]}' | oc create -f -  >> ose-install.log 2>&1
-echo '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"logging-deployer","namespace":"openshift-infra"},"secrets":[{"name":"logging-deployer"}]}' | oc create -f -  >> ose-install.log 2>&1
-oc policy add-role-to-user edit system:serviceaccount:logging:logging-deployer  >> ose-install.log 2>&1
+oc policy add-role-to-user edit --serviceaccount logging-deployer >> ose-install.log 2>&1
 oadm policy add-scc-to-user privileged system:serviceaccount:logging:aggregated-logging-fluentd  >> ose-install.log 2>&1
 oadm policy add-cluster-role-to-user cluster-reader system:serviceaccount:logging:aggregated-logging-fluentd  >> ose-install.log 2>&1
-oc process logging-deployer-template -n openshift -v KIBANA_HOSTNAME=kibana.apps.${DOMAIN},ES_CLUSTER_SIZE=1,MASTER_URL=https://openshift.${DOMAIN}:${MASTER_HTTPS_PORT},PUBLIC_MASTER_URL=https://openshift.${DOMAIN}:${MASTER_HTTPS_PORT} | oc create -f -  >> ose-install.log 2>&1
+oc new-app logging-deployer-template -p KIBANA_HOSTNAME=kibana.apps.${DOMAIN},ES_CLUSTER_SIZE=1,MASTER_URL=https://openshift.${DOMAIN}:${MASTER_HTTPS_PORT},PUBLIC_MASTER_URL=https://openshift.${DOMAIN}:${MASTER_HTTPS_PORT} >> ose-install.log 2>&1
+oc import-image logging-auth-proxy:3.2.0 --from registry.access.redhat.com/openshift3/logging-auth-proxy:3.2.0 --confirm >> ose-install.log 2>&1
+oc import-image logging-kibana:3.2.0 --from registry.access.redhat.com/openshift3/logging-kibana:3.2.0 --confirm >> ose-install.log 2>&1
+oc import-image logging-elasticsearch:3.2.0 --from registry.access.redhat.com/openshift3/logging-elasticsearch:3.2.0 --confirm >> ose-install.log 2>&1
+oc import-image logging-fluentd:3.2.0 --from registry.access.redhat.com/openshift3/logging-fluentd:3.2.0 --confirm >> ose-install.log 2>&1
 wait_for_pod "logging-deployer" "Completed"
-oc delete oauthclient/kibana-proxy >> ose-install.log 2>&1
 oc process logging-support-template | oc create -f -  >> ose-install.log 2>&1
 sleep 20
 oc scale dc/logging-fluentd --replicas=1 >> ose-install.log 2>&1
-oc scale rc/logging-fluentd-1 --replicas=1 >> ose-install.log 2>&1
 wait_for_pod "logging-fluentd" "Running"
-sed -i "/assetConfig:/a\ \ loggingPublicURL: \"https:\/\/kibana.apps.${DOMAIN}:${MASTER_HTTPS_PORT}\"" /etc/origin/master/master-config.yaml
+sed -i "/assetConfig:/a\ \ loggingPublicURL: \"https:\/\/kibana.apps.${DOMAIN}\"" /etc/origin/master/master-config.yaml
 oadm policy add-role-to-user admin admin -n logging
 
 log info "Created central logging."
@@ -339,17 +340,21 @@ log info "Created central logging."
 # Metrics
 oc project openshift-infra >> ose-install.log 2>&1
 echo '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"metrics-deployer"},"secrets":[{"name":"metrics-deployer"}]}' | oc create -f - >> ose-install.log 2>&1
-#echo '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"hawkular","namespace":"openshift-infra"},"secrets":[{"name":"hawkular"}]}' | oc create -f - >> ose-install.log 2>&1
+echo '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"hawkular","namespace":"openshift-infra"},"secrets":[{"name":"hawkular"}]}' | oc create -f - >> ose-install.log 2>&1
 oadm policy add-role-to-user edit system:serviceaccount:openshift-infra:metrics-deployer >> ose-install.log 2>&1
 oadm policy add-cluster-role-to-user cluster-reader system:serviceaccount:openshift-infra:heapster >> ose-install.log 2>&1
 oc secrets new metrics-deployer nothing=/dev/null >> ose-install.log 2>&1
-oc process -f openshift-ansible/roles/openshift_examples/files/examples/v1.1/infrastructure-templates/enterprise/metrics-deployer.yaml -v HAWKULAR_METRICS_HOSTNAME=metrics.apps.${DOMAIN},MASTER_URL=https://openshift.${DOMAIN}:${MASTER_HTTPS_PORT},USE_PERSISTENT_STORAGE=false | oc create -f - >> ose-install.log 2>&1
+oc new-app -f /usr/share/ansible/openshift-ansible/roles/openshift_examples/files/examples/v1.1/infrastructure-templates/enterprise/metrics-deployer.yaml \
+    -p REDEPLOY=true \
+    -p USE_PERSISTENT_STORAGE=false \
+    -p HAWKULAR_METRICS_HOSTNAME=metrics.apps.${DOMAIN} \
+    -p MASTER_URL=https://openshift.${DOMAIN}:${MASTER_HTTPS_PORT} >> ose-install.log 2>&1
 sed -i "/assetConfig:/a\ \ metricsPublicURL: \"https://metrics.apps.${DOMAIN}:${MASTER_HTTPS_PORT}/hawkular/metrics\"" /etc/origin/master/master-config.yaml
 
 wait_for_pod "metrics-deployer" "Completed"
 wait_for_pod "hawkular-cassandra" "Running"
-wait_for_pod "heapster" "Running"
 wait_for_pod "hawkular-metrics" "Running"
+wait_for_pod "heapster" "Running"
 
 systemctl restart atomic-openshift-master.service
 systemctl restart atomic-openshift-node.service

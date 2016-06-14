@@ -1,4 +1,5 @@
 #!/bin/bash
+OSE_VERSION="3_2"
 
 trap interrupt 1 2 3 6 9 15
 
@@ -58,17 +59,17 @@ function sleep_while_vm () {
     ;; 
   esac
 
-  VM_STATE="`virsh domstate OSE_${NODE_TYPE}_${NODE_NAME}`"
+  VM_STATE="`virsh domstate OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}`"
   while [ "$VM_STATE" = "$CHECK_STATE" ]; do
     sleep 10
-    VM_STATE="`virsh domstate OSE_${NODE_TYPE}_${NODE_NAME}`" 
+    VM_STATE="`virsh domstate OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}`" 
   done 
 }
 
 function interrupt()
 {
   echo "OSE VM creation for $NODE_TYPE $NODE_NAME aborted"
-  rm -f OSE_${NODE_TYPE}_${NODE_NAME}.xml /tmp/vmlinuz-ose /tmp/initrd.img-ose
+  rm -f OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml /tmp/vmlinuz-ose /tmp/initrd.img-ose
   exit
 }
 
@@ -245,7 +246,7 @@ chcon -t virt_image_t /tmp/initrd.img-ose >> ose_vm_create_${NODE_TYPE}_${NODE_N
 
 log info "Providing vmlinuz and initrd for initial creation."
 
-qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT ${NODE_DISKSIZE} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+qemu-img create -f $NODE_DISKFORMAT ${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.$NODE_DISKFORMAT ${NODE_DISKSIZE} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
 log info "Created VM image."
 
@@ -256,9 +257,9 @@ virsh net-update default add dns-host --xml $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml
 
 log info "Updated default network."
 
-cat > OSE_${NODE_TYPE}_${NODE_NAME}.xml <<EOF
+cat > OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml <<EOF
 <domain type="kvm" xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
-  <name>OSE_${NODE_TYPE}_${NODE_NAME}</name>
+  <name>OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}</name>
   <memory unit='MB'>${NODE_MEMORY}</memory>
   <os>
     <type arch='x86_64' machine='pc-i440fx-rhel7.0.0'>hvm</type>
@@ -307,17 +308,17 @@ cat > OSE_${NODE_TYPE}_${NODE_NAME}.xml <<EOF
 </domain>
 EOF
 
-virsh destroy OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-virsh undefine OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --disk path=${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}.$NODE_DISKFORMAT,format=$NODE_DISKFORMAT,bus=$NODE_DISKBUS,io=$NODE_DISKIO,cache=$NODE_DISKCACHE >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --add-device --network default,model=virtio >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --edit --cpu host,-invtsc >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-virt-xml OSE_${NODE_TYPE}_${NODE_NAME} --edit --vcpu ${NODE_VCPUS} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh destroy OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh undefine OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh define OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} --add-device --disk path=${VM_PATH}/ose_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.$NODE_DISKFORMAT,format=$NODE_DISKFORMAT,bus=$NODE_DISKBUS,io=$NODE_DISKIO,cache=$NODE_DISKCACHE >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} --add-device --network default,model=virtio >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} --edit --cpu host,-invtsc >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virt-xml OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} --edit --vcpu ${NODE_VCPUS} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
 log info "Created VM config."
 
-virsh start OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh start OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
 log info "Starting VM for initial setup and configuration."
 rm -f $DIRNAME/ose-${NODE_TYPE}-dns-vm.xml $DIRNAME/ose-${NODE_TYPE}-kickstart-vm.cfg 
@@ -326,18 +327,18 @@ sleep_while_vm running
 
 log info "Stopped VM."
 
-virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} hda --current >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME} fd0 --current >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} hda --current >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh detach-disk OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} fd0 --current >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
-virsh dumpxml OSE_${NODE_TYPE}_${NODE_NAME} > OSE_${NODE_TYPE}_${NODE_NAME}.xml
-sed -i 's/<kernel>.*<\/kernel>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
-sed -i 's/<initrd>.*<\/initrd>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
-sed -i 's/<cmdline>.*<\/cmdline>//g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
-sed -i 's/<on_reboot>.*<\/on_reboot>/<on_reboot>restart<\/on_reboot>/g' OSE_${NODE_TYPE}_${NODE_NAME}.xml
-virsh undefine OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
-virsh define OSE_${NODE_TYPE}_${NODE_NAME}.xml >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh dumpxml OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} > OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml
+sed -i 's/<kernel>.*<\/kernel>//g' OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml
+sed -i 's/<initrd>.*<\/initrd>//g' OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml
+sed -i 's/<cmdline>.*<\/cmdline>//g' OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml
+sed -i 's/<on_reboot>.*<\/on_reboot>/<on_reboot>restart<\/on_reboot>/g' OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml
+virsh undefine OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh define OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
 
-rm -f OSE_${NODE_TYPE}_${NODE_NAME}.xml /tmp/vmlinuz-ose /tmp/initrd.img-ose
+rm -f OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml /tmp/vmlinuz-ose /tmp/initrd.img-ose
 
 log info "Starting VM"
-virsh start OSE_${NODE_TYPE}_${NODE_NAME} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
+virsh start OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION} >> ose_vm_create_${NODE_TYPE}_${NODE_NAME}.log 2>&1
