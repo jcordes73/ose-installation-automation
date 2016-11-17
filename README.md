@@ -7,7 +7,7 @@ The OpenShift Enterprise v3.3 Automated Installation package provides a set of t
 
 Create virtual-machines
 -------
-For convenience purposes the OSE v3.2 Automated Installation package includes a script to create virtual-machines on RHEL 7 using libvirt. You need to run this script with root privileges.
+For convenience purposes the OSE v3.3 Automated Installation package includes a script to create virtual-machines on RHEL 7 using libvirt. You need to run this script with root privileges.
 ### Master
 To create a master-node VM execute
 ```
