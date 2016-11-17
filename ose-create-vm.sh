@@ -1,5 +1,5 @@
 #!/bin/bash
-OSE_VERSION="3_2"
+OSE_VERSION="3_3"
 
 trap interrupt 1 2 3 6 9 15
 

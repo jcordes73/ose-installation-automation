@@ -1,6 +1,6 @@
-OpenShift Enterprise v3.2 Automated Installation
+OpenShift Enterprise v3.3 Automated Installation
 ============================
-The OpenShift Enterprise v3.2 Automated Installation package provides a set of tools to
+The OpenShift Enterprise v3.3 Automated Installation package provides a set of tools to
 
  - Create virtual-machines
  - Install master and minion nodes
@@ -28,7 +28,7 @@ Node installation script
 ### Domain configuration
 The OpenShift domain configuration has to be defined in **ose-install.cfg**. This file then has to be copied to the master-node from where the OpenShift domain installation is triggered.
 
-The content of this file is described at https://docs.openshift.com/enterprise/3.2/install_config/install/advanced_install.html and is the same as for **/etc/ansible/hosts**.
+The content of this file is described at https://access.redhat.com/documentation/en/openshift-container-platform/3.3/single/installation-and-configuration#install-config-install-advanced-install and is the same as for **/etc/ansible/hosts**.
 
 The example configuration contains this content
 ```
@@ -46,20 +46,21 @@ product_type=openshift
 deployment_type=openshift-enterprise
 
 # enable htpasswd authentication
-openshift_master_identity_providers=[{'name': 'htpasswd_auth', 'login': 'true', 'challenge': 'true', 'kind': 'HTPasswdPasswordIdentityProvider', 'filename': '/etc/openshift/openshift-passwd'}]
+openshift_master_identity_providers=[{'name': 'htpasswd_auth', 'login': 'true', 'challenge': 'true', 'kind': 'HTPasswdPasswordIdentityProvider', 'filename': '/etc/origin/openshift-passwd'}]
 
 # default domain
-osm_default_subdomain=apps.example.com
+openshift_master_default_subdomain=apps.example.com
 
-openshift_master_api_port=8443
-openshift_master_console_port=8443
+# Metrics and logging
+openshift_hosted_metrics_deploy=true
+openshift_master_logging_public_url=https://kibana.example.com
 
 # host group for masters
 [masters]
-openshift.example.com openshift_node_labels="{'region': 'primary', 'zone': 'default'}" openshift_scheduleable=True
+openshift.example.com openshift_node_labels="{'region': 'infra', 'zone': 'default'}" openshift_scheduleable=True
 # host group for nodes, includes region info
 [nodes]
-openshift.example.com openshift_node_labels="{'region': 'primary', 'zone': 'default'}"
+openshift.example.com openshift_node_labels="{'region': 'infra', 'zone': 'default'}"
 ```
 
 ### Master/Node installation
