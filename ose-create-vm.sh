@@ -1,5 +1,5 @@
 #!/bin/bash
-OSE_VERSION="3_3"
+OSE_VERSION="3_5"
 
 trap interrupt 1 2 3 6 9 15
 
@@ -45,7 +45,6 @@ function show_usage() {
   echo "    --vcpus=<#vcpus> (default is 2)"
   echo "    --memory=<RAM in MB> (default is 4096)"
   echo "    --node-type=master|node (default is master)"
-  echo "    --enable-data-plane=<yes|no> (it's disabled by default)"
 }
 
 function sleep_while_vm () {
@@ -86,7 +85,6 @@ NODE_DISKIO="native"
 NODE_DISKCACHE="directsync"
 NODE_ATTACH_DISK=""
 NODE_ROOT_PASSWORD=""
-NODE_DATA_PLANE="off"
 
 DIRNAME=`dirname "$0"`
 
@@ -134,11 +132,6 @@ for opt in $OPTS ; do
   ;;
   --root-pw=*)
      NODE_ROOT_PASSWORD="$VALUE"
-  ;;
-  --enable-data-plane=*)
-     if [ "$VALUE" = "yes" ] ; then
-       NODE_DATA_PLANE="on"
-     fi
   ;;
   --rhn-username=*)
      RHN_USERNAME=$VALUE
@@ -300,10 +293,6 @@ cat > OSE_${NODE_TYPE}_${NODE_NAME}_${OSE_VERSION}.xml <<EOF
   <qemu:commandline>
     <qemu:arg value='-set'/>
     <qemu:arg value='device.virtio-disk0.config-wce=off'/>
-  </qemu:commandline>
-  <qemu:commandline>
-    <qemu:arg value='-set'/>
-    <qemu:arg value='device.virtio-disk0.x-data-plane=${NODE_DATA_PLANE}'/>
   </qemu:commandline>
 </domain>
 EOF

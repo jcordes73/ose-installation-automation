@@ -4,7 +4,7 @@ trap interrupt 1 2 3 6 9 15
 
 function interrupt()
 {
-  echo "OpenShift Enterprise v3.3 installation aborted"
+  echo "OpenShift Enterprise v3.5 installation aborted"
   exit
 }
 
@@ -122,19 +122,12 @@ else
   exit
 fi
 
-log info "Starting OpenShift Enterprise v3.3 installation."
+log info "Starting OpenShift Enterprise v3.5 installation."
 
 # Get IP of system
 IP=` nslookup $HOSTNAME | grep -1 $HOSTNAME | grep Address | cut -d' ' -f2`
-echo "$IP $HOSTNAME" >> /etc/hosts
 
-log info "Setup /etc/hosts."
-
-firewall-cmd --zone=public --add-port=22/tcp --permanent >> ose-install.log 2>&1
-firewall-cmd --reload >> ose-install.log 2>&1
-
-log info "Setup firewall for SSH access."
-
+# Setting up SSH key-access
 rm -f ~/.ssh/id_rsa
 ssh-keygen -t rsa -f ~/.ssh/id_rsa -N "" >> ose-install.log 2>&1
 cat > ./getpwd.sh <<EOF
@@ -160,18 +153,7 @@ EOF
 done
 rm -f ./getpwd.sh
 
-# Remove search-domain
-nmcli con mod "System eth0" ipv4.dns-search ''
-nmcli con reload "System eth0"
-
 log info "Setup master and nodes for SSH access via keys."
-
-echo "VG=vg-docker" >> /etc/sysconfig/docker-storage-setup
-docker-storage-setup >> ose-install.log 2>&1
-
-systemctl restart docker >> ose-install.log 2>&1
-
-log info "Installed docker."
 
 # Create master wildcard certificate
 CA=/etc/origin/master
@@ -181,31 +163,32 @@ log info "Starting deployment via Ansible"
 
 mkdir -p /etc/ansible
 cp ose-install.cfg /etc/ansible/hosts
-yum install -y atomic-openshift-utils >> ose-install.log 2>&1
 ansible-playbook -v /usr/share/ansible/openshift-ansible/playbooks/byo/config.yml >> ose-install.log 2>&1
 
-sed -i "s/bindAddress: .*:53/bindAddress: $IP:53/" /etc/origin/master/master-config.yaml
+oc adm policy add-role-to-user view system:serviceaccount:openshift-infra:hawkular -n openshift-infra >> ose-install.log 2>&1
+
+sed -i "s/bindAddress: .*:53/bindAddress: 127.0.0.1:8053/" /etc/origin/master/master-config.yaml
 systemctl restart atomic-openshift-master.service
 
 log info "Finished ansible deployment."
 
 # Add users
-htpasswd -c -b /etc/origin/openshift-passwd demo 'redhat2016!' >> ose-install.log 2>&1
+htpasswd -c -b /etc/origin/openshift-passwd demo 'redhat2017!' >> ose-install.log 2>&1
 log info "Created user demo."
-htpasswd -b /etc/origin/openshift-passwd admin 'redhat2016!' >> ose-install.log 2>&1
-oadm policy add-role-to-user system:registry admin
-oadm policy add-role-to-user admin admin -n openshift
-oadm policy add-role-to-user system:image-builder admin
+htpasswd -b /etc/origin/openshift-passwd admin 'redhat2017!' >> ose-install.log 2>&1
+oadm policy add-role-to-user system:registry admin >> ose-install.log 2>&1
+oadm policy add-role-to-user admin admin -n openshift >> ose-install.log 2>&1
+oadm policy add-role-to-user system:image-builder admin >> ose-install.log 2>&1
 log info "Created user admin."
-htpasswd -b /etc/origin/openshift-passwd developer 'redhat2016!' >> ose-install.log 2>&1
+htpasswd -b /etc/origin/openshift-passwd developer 'redhat2017!' >> ose-install.log 2>&1
 log info "Created user developer."
-htpasswd -b /etc/origin/openshift-passwd tester 'redhat2016!' >> ose-install.log 2>&1
+htpasswd -b /etc/origin/openshift-passwd tester 'redhat2017!' >> ose-install.log 2>&1
 log info "Created user tester."
 
 # Deploy a router
 oadm policy add-cluster-role-to-user \
     cluster-reader \
-    system:serviceaccount:default:router
+    system:serviceaccount:default:router >> ose-install.log 2>&1
 
 oadm ca create-server-cert --signer-cert=$CA/ca.crt \
       --signer-key=$CA/ca.key --signer-serial=$CA/ca.serial.txt \
@@ -216,20 +199,9 @@ cat $CA/apps.crt $CA/apps.key $CA/ca.crt > $CA/apps.pem
 
 oadm router router --replicas=1 \
     --service-account=router \
-    --config=/etc/origin/master/admin.kubeconfig \
-    --credentials='/etc/origin/master/openshift-router.kubeconfig' \
-    --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
     --default-cert=$CA/apps.pem >> ose-install.log 2>&1
 
 log info "Deployed router."
-
-# Create registry
-#oadm registry --service-account=registry \
-#    --config=/etc/origin/master/admin.kubeconfig \
-#    --images='registry.access.redhat.com/openshift3/ose-${component}:${version}' \
-#    --mount-host=/docker-registry
-
-sudo chown 1001:root /docker-registry
 
 wait_for_pod "docker-registry"
 

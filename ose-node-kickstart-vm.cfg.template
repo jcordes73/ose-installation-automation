@@ -11,10 +11,15 @@ zerombr
 clearpart --all --initlabel
 part /boot --fstype ext4 --size=500 --ondisk=vda --asprimary
 part pv.openshift --size=40960 --ondisk=vda --grow
-volgroup vg-openshift pv.openshift
-logvol / --fstype ext4 --name=root --vgname=vg-openshift --size=20280 --grow
-logvol /home --fstype ext4 --name=home --vgname=vg-openshift --size=10240
-logvol swap --fstype swap --name=swap --vgname=vg-openshift --size=4096
+part pv.docker --size=30720 --ondisk=vda
+part pv.dockerregistry --size=30520 --ondisk=vda
+volgroup openshift-vg pv.openshift
+volgroup docker-vg pv.docker
+volgroup dockerregistry-vg pv.dockerregistry
+logvol / --fstype ext4 --name=root --vgname=openshift-vg --size=20280 --grow
+logvol /home --fstype ext4 --name=home --vgname=openshift-vg --size=10240
+logvol swap --fstype swap --name=swap --vgname=openshift-vg --size=4096
+logvol /docker-registry --fstype ext4 --name=dockerregistry --vgname=dockerregistry-vg --size=28000
 auth --passalgo=sha512 --useshadow
 selinux --enforcing
 firewall --enabled
@@ -28,13 +33,15 @@ subscription-manager register --username='RHN_USERNAME' --password='RHN_PASSWORD
 echo "Attaching OpenShift Enterprise subscription."
 subscription-manager attach --pool=POOL_ID
 subscription-manager repos --disable="*"
-subscription-manager repos --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-optional-rpms" --enable="rhel-7-server-ose-3.3-rpms"
+subscription-manager repos --enable="rhel-7-server-rpms" --enable="rhel-7-server-extras-rpms" --enable="rhel-7-server-ose-3.5-rpms" --enable="rhel-7-fast-datapath-rpms"
 echo "Installing additional software."
 yum install -y deltarpm
+yum install -y wget git net-tools bind-utils iptables-services bridge-utils bash-completion
 yum update -y
-yum install -y wget git net-tools bind-utils bind-chroot iptables-services bridge-utils bash-completion
-yum install -y docker-1.10.3
 yum install -y python-virtualenv gcc
 yum install -y atomic-openshift-utils
+yum install -y atomic-openshift-excluder atomic-openshift-docker-excluder
+atomic-openshift-excluder unexclude
+yum install -y docker
 %end
 reboot
