@@ -74,7 +74,6 @@ PROXY_HOST=""
 PROXY_PORT=""
 PROXY_USER=""
 PROXY_PASS=""
-MASTER_HTTPS_PORT=8443
 
 for opt in $OPTS ; do
   VALUE="`echo $opt | cut -d"=" -f2`"
@@ -257,13 +256,5 @@ cp $CA/ca.crt /etc/docker/certs.d/${REGISTRY_DC}.${DOMAIN}:${REGISTRY_PORT}
 systemctl restart docker >> ose-install.log 2>&1
 
 log info "Created docker registry route."
-
-# Add additional run-type users
-oc get scc restricted -o yaml | sed -e 's/MustRunAsRange/RunAsAny/' | oc replace scc -f - >> ose-install.log 2>&1
-echo \
-    '{"kind":"ServiceAccount","apiVersion":"v1","metadata":{"name":"jboss","namespace":"default"}}' \
-    | oc create -f - >> ose-install.log 2>&1
-
-oc get scc privileged -o json | sed -e '/"users": \[/a"system:serviceaccount:default:jboss",'| oc replace scc -f - >> ose-install.log 2>&1
 
 log info "Finished OpenShift installation."
